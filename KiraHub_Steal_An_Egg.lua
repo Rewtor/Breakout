@@ -14194,7 +14194,7 @@ end;
 					Font = t4.body,
 					Text = v,
 					TextColor3 = t3.dim,
-					TextSize = 11,
+					TextSize = 22,
 					TextXAlignment = Enum.TextXAlignment.Left,
 					TextYAlignment = Enum.TextYAlignment.Top,
 					ZIndex = 9
