@@ -2441,7 +2441,7 @@ do
 				Font = t4.body,
 				Text = p56,
 				TextColor3 = t3.dim,
-				TextSize = 22,
+				TextSize = 30,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextYAlignment = Enum.TextYAlignment.Top,
 				TextWrapped = true,
