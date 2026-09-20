@@ -360,7 +360,7 @@ end
 local function Wk(d)
     if not h.WH or h.W == "" or not req then return end
     local m = ""
-    if h.P ~= "" then m = "<@"..h.P.."> Encontrei um Ovo Gigante!" end
+    if h.P ~= "" then m = "<@"..h.P.."> Encontrei um **" .. tostring(d.C) .. "** Gigante!" end
     local E = {{
         title = "Ovo Gigante DETECTADO!",
         color = 65352,
