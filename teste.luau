@@ -205,7 +205,7 @@ end)
 addBtn("Testar Webhook", function()
     if h.W == "" or not req then return end
     local m = ""
-    if h.P ~= "" then m = "<@"..h.P.."> Teste de Ping!" end
+    if h.P ~= "" then m = "Teste de Ping! <@"..h.P..">" end
     local E = {{
         title = "✅ Conexão Estabelecida!",
         description = "O Webhook do Dice Radar está a funcionar perfeitamente e pronto a detetar ovos.",
