@@ -364,9 +364,9 @@ local function Wk(d)
     
     local m = ""
     if h.P ~= "" then 
-        m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de" .. formatNumber(d.R) ..  " Gigante! <@"..h.P..">" 
+        m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "** <@"..h.P..">" 
     else
-        m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de" .. formatNumber(d.R) ..  " pega la"
+        m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "** pega la"
     end
     
     local E = {{
