@@ -56,7 +56,7 @@ gui.Name = "DiceRadarGUI"
 
 local main = Instance.new("Frame", gui)
 main.Size = UDim2.new(0, 250, 0, 515)
-main.Position = UDim2.new(0, 20, 0.5, 0)
+main.Position = UDim2.new(0.5, 20, 0.5, -160)
 main.BackgroundColor3 = Color3.fromRGB(20, 24, 34)
 main.BorderSizePixel = 0
 main.Active = true
