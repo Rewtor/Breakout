@@ -359,12 +359,14 @@ end
 -- ========================================================
 local function Wk(d)
     if not h.WH or h.W == "" or not req then return end
+
+    local playerName = o.Name
     
     local m = ""
     if h.P ~= "" then 
-        m = "Encontrei um **" .. tostring(d.C) .. "** Gigante! <@"..h.P..">" 
+        m = .. playerName .. "Encontrei um **" .. tostring(d.C) .. "** Gigante! <@"..h.P..">" 
     else
-        m = "Encontrei um **" .. tostring(d.C) .. "** Gigante!"
+        m = .. playerName .. "Encontrei um **" .. tostring(d.C) .. "** Gigante!"
     end
     
     local E = {{
