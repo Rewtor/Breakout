@@ -360,13 +360,6 @@ end
 local function Wk(d)
     if not h.WH or h.W == "" or not req then return end
     
-    local placeId = tostring(game.PlaceId)
-    local jobId = tostring(game.JobId)
-    
-    -- Gera o link clicável padrão do Roblox e o script de TP
-    local clickLink = string.format("https://www.roblox.com/games/%s/Lobby?gameInstanceId=%s", placeId, jobId)
-    local tpCode = string.format("game:GetService('TeleportService'):TeleportToPlaceInstance(%s, '%s', game.Players.LocalPlayer)", placeId, jobId)
-    
     local m = ""
     if h.P ~= "" then 
         m = "Encontrei um **" .. tostring(d.C) .. "** Gigante! <@"..h.P..">" 
@@ -376,7 +369,6 @@ local function Wk(d)
     
     local E = {{
         title = "🥚 Ovo Gigante DETECTADO!",
-        url = clickLink, -- Faz o próprio título da mensagem ser um botão clicável
         color = 65352,
         fields = {
             {name = "Categoria", value = d.C, inline = true},
@@ -384,8 +376,6 @@ local function Wk(d)
             {name = "Raridade", value = d.Rar, inline = true},
             {name = "Tamanho", value = d.P, inline = true},
             {name = "Dinheiro/S", value = "$" .. formatNumber(d.R) .. "/s", inline = true},
-            {name = "📱 Entrar pelo Celular/PC", value = "[👉 CLIQUE AQUI PARA ENTRAR NO SERVIDOR](" .. clickLink .. ")", inline = false},
-            {name = "💻 Script para Juntar (Amigos com Executor)", value = "```lua\n" .. tpCode .. "\n```", inline = false}
         }
     }}
     
