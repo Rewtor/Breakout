@@ -364,9 +364,9 @@ local function Wk(d)
     
     local m = ""
     if h.P ~= "" then 
-        m = .. playerName .. "Encontrei um **" .. tostring(d.C) .. "** Gigante! <@"..h.P..">" 
+        m = playerName .. "encontrou **" .. tostring(d.C) .. "** Gigante! <@"..h.P..">" 
     else
-        m = .. playerName .. "Encontrei um **" .. tostring(d.C) .. "** Gigante!"
+        m = playerName .. "encontrou **" .. tostring(d.C) .. "** Gigante!"
     end
     
     local E = {{
