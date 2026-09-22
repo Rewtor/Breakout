@@ -42,6 +42,7 @@ h.AHT = tonumber(h.AHT) or 60
 local X = {} -- Registo de ovos já enviados ao Webhook (para não repetir)
 local Z = {} -- Registo dos elementos visuais ESP ativos no mapa
 local b = 0  -- Maior rendimento encontrado no momento
+local isHopping = false -- Controle de teleporte
 local lastReset = os.clock()
 local lastValidEggTime = os.clock() -- Temporizador para contagem do Auto Server Hop
 
@@ -226,12 +227,14 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Troca de Servidor Sem Cache)
+-- 4. SISTEMA DE SERVER HOP (Melhorado com Retry)
 -- ========================================================
 local function doServerHop()
+    if isHopping then return end
+    isHopping = true -- Trava para não spammar
+    
     pcall(function()
         if stat then stat.Text = "Status: Procurando servidor vazio..." end
-        -- Utiliza _nocache dinâmico para forçar o Roblox a entregar uma lista atualizada de servidores
         local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
         
         local success, result = pcall(function() return game:HttpGet(url) end)
@@ -240,7 +243,6 @@ local function doServerHop()
             if data and data.data then
                 local availableServers = {}
                 for _, v in ipairs(data.data) do
-                    -- Filtra apenas servidores válidos, diferentes do atual e com vagas abertas
                     if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing < v.maxPlayers then
                         table.insert(availableServers, v.id)
                     end
@@ -250,11 +252,20 @@ local function doServerHop()
                     math.randomseed(os.clock())
                     local randomServerId = availableServers[math.random(1, #availableServers)]
                     if stat then stat.Text = "Status: Teleportando..." end
+                    
                     TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
+                    
+                    -- Se o teleporte falhar, após 8 segundos ele destrava para tentar de novo
+                    task.delay(8, function()
+                        isHopping = false
+                        lastValidEggTime = os.clock() -- Reseta o timer suavemente
+                    end)
                     return
                 end
             end
         end
+        -- Se não achou servidor na lista, destrava imediatamente
+        isHopping = false
         if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
     end)
 end
@@ -578,7 +589,7 @@ task.spawn(function()
             if act > 0 then
                 lastValidEggTime = os.clock()
             elseif h.AH and (os.clock() - lastValidEggTime >= h.AHT) then
-                lastValidEggTime = os.clock() + 99999
+                -- Removido o 99999 daqui! A trava agora é dentro do doServerHop.
                 task.spawn(doServerHop)
             end
             
