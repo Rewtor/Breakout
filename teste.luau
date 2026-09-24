@@ -227,14 +227,15 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Melhorado com Retry)
+-- 4. SISTEMA DE SERVER HOP (Vazio e Anti-Erro 279)
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
     isHopping = true -- Trava para não spammar
     
     pcall(function()
-        if stat then stat.Text = "Status: Procurando servidor vazio..." end
+        if stat then stat.Text = "Status: Procurando servidor vazio (1 pessoa)..." end
+        -- Voltamos para Asc (crescente) para puxar os servidores mais vazios
         local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
         
         local success, result = pcall(function() return game:HttpGet(url) end)
@@ -242,8 +243,11 @@ local function doServerHop()
             local data = a:JSONDecode(result)
             if data and data.data then
                 local availableServers = {}
+                
                 for _, v in ipairs(data.data) do
-                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing < v.maxPlayers then
+                    -- O SEGREDO: Pega servidores que tenham 1 ou 2 pessoas. 
+                    -- Isso garante que não é um servidor fantasma (0 pessoas) e mantém o mapa vazio pra você.
+                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 1 and v.playing <= 2 then
                         table.insert(availableServers, v.id)
                     end
                 end
