@@ -1,7 +1,6 @@
 -- ========================================================
 -- 1. IMPORTAÇÃO DOS SERVIÇOS DO ROBLOX
 -- ========================================================
--- Obtemos os serviços essenciais do motor do Roblox para manipular jogadores, workspace, interface e pedidos HTTP.
 local e = game:GetService("Players")
 local r = game:GetService("Workspace")
 local y = game:GetService("RunService")
@@ -12,17 +11,14 @@ local j = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local o = e.LocalPlayer
 
--- Identifica a função de requisição HTTP disponível no executor atual (Synapse, Krnl, etc.)
 local req = (syn and syn.request) or http_request or request or HttpPost
 
 -- ========================================================
 -- 2. CONFIGURAÇÕES PADRÃO E GESTÃO DE FICHEIRO JSON
 -- ========================================================
--- Tabela com os valores padrão de configuração do radar (Webhook, Filtros, ESP e Auto Hop)
 local h = {W="", P="", I=0, S=0, E=true, WH=false, AH=false, AHT=60}
 local cfgFile = "DiceRadar_Config.json"
 
--- Se já existir um ficheiro de configuração guardado, lê e substitui os valores padrão
 if isfile and readfile and isfile(cfgFile) then
     pcall(function()
         local saved = a:JSONDecode(readfile(cfgFile))
@@ -34,22 +30,21 @@ if isfile and readfile and isfile(cfgFile) then
     end)
 end
 
--- Blindagem para garantir que os valores numéricos são sempre lidos como números
 h.I = tonumber(h.I) or 0
 h.S = tonumber(h.S) or 0
 h.AHT = tonumber(h.AHT) or 60
 
-local X = {} -- Registo de ovos já enviados ao Webhook (para não repetir)
-local Z = {} -- Registo dos elementos visuais ESP ativos no mapa
-local b = 0  -- Maior rendimento encontrado no momento
-local isHopping = false -- Controle de teleporte
+local X = {} 
+local Z = {} 
+local cachedEggs = {} -- OTIMIZAÇÃO MAXIMA: Memória para não fritar o CPU do dispositivo
+local b = 0  
+local isHopping = false 
 local lastReset = os.clock()
-local lastValidEggTime = os.clock() -- Temporizador para contagem do Auto Server Hop
+local lastValidEggTime = os.clock() 
 
 -- ========================================================
 -- 3. CONSTRUÇÃO DA INTERFACE GRÁFICA (GUI)
 -- ========================================================
--- Destrói a interface anterior caso já esteja aberta para evitar duplicados
 if c:FindFirstChild("DiceRadarGUI") then c.DiceRadarGUI:Destroy() end
 
 local gui = Instance.new("ScreenGui", c)
@@ -57,17 +52,17 @@ gui.Name = "DiceRadarGUI"
 
 local main = Instance.new("Frame", gui)
 main.Size = UDim2.new(0, 250, 0, 515)
-main.Position = UDim2.new(0.5, 20, 0.5, -250)
+main.AnchorPoint = Vector2.new(0.5, 0.5) -- Mantém perfeitamente centrado
+main.Position = UDim2.new(0.5, 0, 0.5, 0)
 main.BackgroundColor3 = Color3.fromRGB(20, 24, 34)
 main.BorderSizePixel = 0
 main.Active = true
-main.Draggable = true -- Permite arrastar a janela pelo ecrã
+main.Draggable = true 
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 8)
 local stk = Instance.new("UIStroke", main)
 stk.Color = Color3.fromRGB(0, 195, 255)
 stk.Thickness = 1.5
 
--- Barra de Título da Janela
 local top = Instance.new("Frame", main)
 top.Size = UDim2.new(1, 0, 0, 30)
 top.BackgroundTransparency = 1
@@ -81,7 +76,6 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 14
 title.TextXAlignment = Enum.TextXAlignment.Left
 
--- Área de Scroll para conter os botões e caixas de texto
 local cont = Instance.new("ScrollingFrame", main)
 cont.Size = UDim2.new(1, 0, 1, -35)
 cont.Position = UDim2.new(0, 0, 0, 35)
@@ -91,7 +85,6 @@ local lay = Instance.new("UIListLayout", cont)
 lay.Padding = UDim.new(0, 5)
 lay.SortOrder = Enum.SortOrder.LayoutOrder
 
--- Função auxiliar para criar caixas de texto dinamicamente
 local function addBox(txt, val, cb)
     local f = Instance.new("Frame", cont)
     f.Size = UDim2.new(1, 0, 0, 40)
@@ -117,7 +110,6 @@ local function addBox(txt, val, cb)
     bx.FocusLost:Connect(function() cb(bx.Text) end)
 end
 
--- Função auxiliar para criar botões de ligar/desligar (Toggles)
 local function addTog(txt, val, cb)
     local f = Instance.new("Frame", cont)
     f.Size = UDim2.new(1, 0, 0, 30)
@@ -150,7 +142,6 @@ local function addTog(txt, val, cb)
     end)
 end
 
--- Função auxiliar para criar botões de ação
 local function addBtn(txt, cb)
     local f = Instance.new("Frame", cont)
     f.Size = UDim2.new(1, 0, 0, 30)
@@ -167,7 +158,6 @@ local function addBtn(txt, cb)
     btn.MouseButton1Click:Connect(cb)
 end
 
--- Label de Status em tempo real (mostra ovos detetados, válidos e melhor renda)
 local stat = Instance.new("TextLabel", cont)
 stat.Size = UDim2.new(1, -20, 0, 60)
 stat.Position = UDim2.new(0, 10, 0, 0)
@@ -180,18 +170,16 @@ stat.TextXAlignment = Enum.TextXAlignment.Left
 stat.TextYAlignment = Enum.TextYAlignment.Top
 stat.TextWrapped = true
 
--- Registo dos controlos na interface
 addBox("Webhook URL", h.W, function(v) h.W = v end)
 addBox("Ping Discord ID", h.P, function(v) h.P = v end)
 addBox("Min Real Income ($/s)", h.I, function(v) h.I = tonumber(v) or 0 end)
 addBox("Min Scale ou Kg", h.S, function(v) h.S = tonumber(v) or 0 end)
 addBox("Auto Hop Timer (s)", h.AHT, function(v) h.AHT = tonumber(v) or 60 end)
 
--- Botão de ligar/desligar o ESP (atualiza a visibilidade instantaneamente)
+-- ESP Toggle sem Highlight
 addTog("Enable ESP", h.E, function(v) 
     h.E = v 
     for k, esp in pairs(Z) do
-        if esp.H then pcall(function() esp.H.Enabled = v end) end
         if esp.B then pcall(function() esp.B.Enabled = v end) end
     end
 end)
@@ -202,7 +190,6 @@ addTog("Auto Server Hop", h.AH, function(v)
     lastValidEggTime = os.clock() 
 end)
 
--- Botão para testar o envio de mensagens para o Discord
 addBtn("Testar Webhook", function()
     if h.W == "" or not req then return end
     local m = ""
@@ -217,7 +204,6 @@ addBtn("Testar Webhook", function()
     end)
 end)
 
--- Botão para salvar as preferências atuais no ficheiro JSON
 addBtn("Salvar Configurações", function()
     if writefile then
         pcall(function()
@@ -227,15 +213,14 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Vazio e Anti-Erro 279)
+-- 4. SISTEMA DE SERVER HOP (Melhorado com Retry Seguro)
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
-    isHopping = true -- Trava para não spammar
+    isHopping = true 
     
     pcall(function()
-        if stat then stat.Text = "Status: Procurando servidor vazio (1 pessoa)..." end
-        -- Voltamos para Asc (crescente) para puxar os servidores mais vazios
+        if stat then stat.Text = "Status: Procurando servidor vazio..." end
         local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
         
         local success, result = pcall(function() return game:HttpGet(url) end)
@@ -243,11 +228,8 @@ local function doServerHop()
             local data = a:JSONDecode(result)
             if data and data.data then
                 local availableServers = {}
-                
                 for _, v in ipairs(data.data) do
-                    -- O SEGREDO: Pega servidores que tenham 1 ou 2 pessoas. 
-                    -- Isso garante que não é um servidor fantasma (0 pessoas) e mantém o mapa vazio pra você.
-                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 1 and v.playing <= 2 then
+                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing < v.maxPlayers then
                         table.insert(availableServers, v.id)
                     end
                 end
@@ -259,16 +241,14 @@ local function doServerHop()
                     
                     TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
                     
-                    -- Se o teleporte falhar, após 8 segundos ele destrava para tentar de novo
                     task.delay(8, function()
                         isHopping = false
-                        lastValidEggTime = os.clock() -- Reseta o timer suavemente
+                        lastValidEggTime = os.clock() 
                     end)
                     return
                 end
             end
         end
-        -- Se não achou servidor na lista, destrava imediatamente
         isHopping = false
         if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
     end)
@@ -279,7 +259,6 @@ addBtn("Server Hop (Servidor Vazio)", doServerHop)
 -- ========================================================
 -- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
 -- ========================================================
--- Procura de forma segura pelos módulos de estado dos ovos, utilitários e cálculos de rendimento do jogo
 local s = nil pcall(function() s = require(j:WaitForChild("Client", 5):WaitForChild("EggState", 5)) end)
 if not s then pcall(function() s = require(j.Client.EggState) end) end
 
@@ -292,7 +271,6 @@ if not AssetEarnings then pcall(function() AssetEarnings = require(j.Shared.Util
 local mutModule = nil pcall(function() mutModule = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Mutations", 5)) end)
 if not mutModule then pcall(function() mutModule = require(j.Shared.Modules.Mutations) end) end
 
--- Função para formatar números grandes em abreviaturas legíveis (ex: 1.50M, 2.30K)
 local function formatNumber(n)
     if n >= 1e12 then return string.format("%.2fT", n/1e12) end
     if n >= 1e9 then return string.format("%.2fB", n/1e9) end
@@ -352,7 +330,6 @@ local function getEggRarity(cat, rawModel, rec)
     match = checkMatch(searchStr)
     if match then return match end
     
-    -- Dicionário de correspondência exata para classificar pets/ovos específicos do jogo
     if string.find(searchStr, "nightflame") or string.find(searchStr, "unicornegg") or string.find(searchStr, "unicorn egg") or string.find(searchStr, "shatteredcolossus") or string.find(searchStr, "kitsune") or string.find(searchStr, "elmaja") or string.find(searchStr, "el maja") then return "Divine" end
     if string.find(searchStr, "gorillaking") or string.find(searchStr, "gorilla king") or string.find(searchStr, "lunardragon") or string.find(searchStr, "lunar dragon") or string.find(searchStr, "onitiger") or string.find(searchStr, "oni tiger") or string.find(searchStr, "mosasaurus") then return "Eternal" end
     if string.find(searchStr, "mutantshark") or string.find(searchStr, "mutant shark") or string.find(searchStr, "skeletonboss") or string.find(searchStr, "skeleton boss") or string.find(searchStr, "stagegg") or string.find(searchStr, "stag egg") or string.find(searchStr, "cosmicdragon") or string.find(searchStr, "cosmic dragon") or string.find(searchStr, "trex") or string.find(searchStr, "t-rex") or string.find(searchStr, "tralaledon") or string.find(searchStr, "kraken") then return "Secret" end
@@ -402,7 +379,7 @@ local function Wk(d)
 end
 
 -- ========================================================
--- 8. SISTEMA DE ESP VISUAL (Contornos e Textos 3D)
+-- 8. SISTEMA DE ESP VISUAL (Apenas Texto - Sem Highlight)
 -- ========================================================
 local function Dk(u, m, d, isValid)
     if not m then return end
@@ -413,22 +390,13 @@ local function Dk(u, m, d, isValid)
         if Z[u].B and Z[u].B:FindFirstChild("TextLabel") then
             Z[u].B.TextLabel.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P)
         end
-        -- Atualiza instantaneamente a visibilidade se o filtro mudar
-        if Z[u].H then pcall(function() Z[u].H.Enabled = isVisible end) end
         if Z[u].B then pcall(function() Z[u].B.Enabled = isVisible end) end
         return 
     end
     
     if not isVisible then return end
     
-    -- Criação do Highlight (Contorno colorido à volta do ovo)
-    local hl = Instance.new("Highlight", m)
-    hl.FillColor = Color3.fromRGB(0, 195, 255)
-    hl.FillTransparency = 0.6
-    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-    hl.Enabled = true
-    
-    -- Criação do BillboardGui (Texto flutuante acima do ovo)
+    -- Criação apenas do BillboardGui (Texto flutuante acima do ovo)
     local bb = Instance.new("BillboardGui", m)
     bb.Size = UDim2.new(0, 150, 0, 50)
     bb.StudsOffset = Vector3.new(0, 4, 0)
@@ -444,11 +412,11 @@ local function Dk(u, m, d, isValid)
     tl.Font = Enum.Font.GothamBold
     tl.TextSize = 11
     
-    Z[u] = {H = hl, B = bb, M = m}
+    Z[u] = {B = bb, M = m}
 end
 
 -- ========================================================
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Otimizado)
 -- ========================================================
 task.spawn(function()
     while task.wait(1.5) do
@@ -456,13 +424,11 @@ task.spawn(function()
             local act = 0
             local total = 0
             
-            -- Reseta o contador do melhor rendimento a cada 10 segundos
             if os.clock() - lastReset >= 10 then
                 b = 0
                 lastReset = os.clock()
             end
             
-            -- Procura e armazena os modelos físicos de ovos presentes nas pastas do jogo
             local pModels = {}
             local function scanFolder(folder)
                 if not folder then return end
@@ -475,7 +441,6 @@ task.spawn(function()
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
             scanFolder(r:FindFirstChild("__DEBRIS"))
             
-            -- Lê os registos em memória do jogo para recolher dados complementares
             local records = {}
             if s then
                 local st, fd = false, nil
@@ -495,91 +460,93 @@ task.spawn(function()
                 end
             end
             
-            -- Itera sobre cada ovo detetado para calcular rendimentos e aplicar filtros
             for u, rawModel in pairs(pModels) do
                 total = total + 1
-                local rec = records[u] or {}
                 
-                local cat = rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rec.AssetCategory or rec.Category or "Egg"
-                local area = rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rec.AreaId or "Unknown"
-                local rarity = getEggRarity(cat, rawModel, rec)
+                -- OTIMIZAÇÃO: Se o ovo não estiver na memória, faz as contas pesadas.
+                if not cachedEggs[u] then
+                    local rec = records[u] or {}
+                    local cat = rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rec.AssetCategory or rec.Category or "Egg"
+                    local area = rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rec.AreaId or "Unknown"
+                    local rarity = getEggRarity(cat, rawModel, rec)
 
-                local scale = tonumber(rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))
-                if not scale then scale = tonumber(rec.Scale or rec.AssetScale) end
-                scale = scale or 1
-                
-                local peso = tonumber(rawModel:GetAttribute("Weight") or rawModel:GetAttribute("Kg") or rawModel:GetAttribute("ModelWeight"))
-                if not peso then peso = tonumber(rec.Weight or rec.Kg or rec.ModelWeight) end
-                
-                local mAttr = rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation") or rec.Mutations or rec.Mutation
-                
-                -- Cálculo nativo do rendimento por segundo do ovo
-                local real = 0
-                if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
-                    pcall(function()
-                        real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({
-                            Category = cat,
-                            Mutations = mAttr,
-                            Scale = scale
-                        })) or 0
-                    end)
-                end
-                
-                -- Sistema de cálculo secundário (Fallback) caso o nativo falhe
-                if real == 0 then
-                    local base = tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))
-                    if not base then base = tonumber(rec.Income or rec.EarningRate or rec.MoneyPerSecond) end
-                    if (not base or base == 0) and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond) end
+                    local scale = tonumber(rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))
+                    if not scale then scale = tonumber(rec.Scale or rec.AssetScale) end
+                    scale = scale or 1
                     
-                    if not base or base == 0 then
+                    local peso = tonumber(rawModel:GetAttribute("Weight") or rawModel:GetAttribute("Kg") or rawModel:GetAttribute("ModelWeight"))
+                    if not peso then peso = tonumber(rec.Weight or rec.Kg or rec.ModelWeight) end
+                    
+                    local mAttr = rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation") or rec.Mutations or rec.Mutation
+                    
+                    local real = 0
+                    if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
                         pcall(function()
-                            if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) end
-                            if (not base or base == 0) and pUtil and pUtil.Assets and pUtil.Assets[cat] then
-                                local ast = pUtil.Assets[cat]
-                                base = tonumber(ast.EarningRate or (ast.Egg and ast.Egg.EarningRate))
-                            end
+                            real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({
+                                Category = cat,
+                                Mutations = mAttr,
+                                Scale = scale
+                            })) or 0
                         end)
                     end
-                    base = base or 0
-                    if base == 0 then base = 1 end
                     
-                    local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
-                    local mutMult = 1
-                    if mutModule and mAttr then
-                        pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
-                    elseif type(mAttr) == "table" then
-                        for _, m in pairs(mAttr) do
-                            local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
-                            mutMult = mutMult * val
+                    if real == 0 then
+                        local base = tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))
+                        if not base then base = tonumber(rec.Income or rec.EarningRate or rec.MoneyPerSecond) end
+                        if (not base or base == 0) and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond) end
+                        
+                        if not base or base == 0 then
+                            pcall(function()
+                                if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) end
+                                if (not base or base == 0) and pUtil and pUtil.Assets and pUtil.Assets[cat] then
+                                    local ast = pUtil.Assets[cat]
+                                    base = tonumber(ast.EarningRate or (ast.Egg and ast.Egg.EarningRate))
+                                end
+                            end)
                         end
-                    elseif mAttr then 
-                        mutMult = 1.5 
+                        base = base or 0
+                        if base == 0 then base = 1 end
+                        
+                        local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
+                        local mutMult = 1
+                        if mutModule and mAttr then
+                            pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
+                        elseif type(mAttr) == "table" then
+                            for _, m in pairs(mAttr) do
+                                local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
+                                mutMult = mutMult * val
+                            end
+                        elseif mAttr then 
+                            mutMult = 1.5 
+                        end
+                        
+                        real = base * scaleMult * mutMult
+                        if real < 1 and base > 0 then real = 1 end
                     end
                     
-                    real = base * scaleMult * mutMult
-                    if real < 1 and base > 0 then real = 1 end
+                    real = math.floor(real + 0.5)
+                    local pesoStr = peso and string.format("%.1f Kg", peso) or string.format("%.1fx", scale)
+                    local checkSize = peso or scale or 0
+                    
+                    -- Guarda todas as contas na memória!
+                    cachedEggs[u] = {C=cat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
                 end
                 
-                real = math.floor(real + 0.5)
-                if real > b then b = real end
+                -- Puxa da memória instantaneamente sem processamento pesado
+                local cData = cachedEggs[u]
+                if cData.R > b then b = cData.R end
                 
-                local pesoStr = peso and string.format("%.1f Kg", peso) or string.format("%.1fx", scale)
-                local checkSize = peso or scale or 0
-                
-                -- Verifica se o ovo cumpre os requisitos definidos pelo utilizador nos filtros
-                local isValid = (real >= h.I and checkSize >= h.S)
-                
-                local d = {U=u, C=cat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity}
+                local isValid = (cData.R >= h.I and cData.CS >= h.S)
+                local d = {U=u, C=cData.C, A=cData.A, S=cData.S, R=cData.R, P=cData.P, Rar=cData.Rar}
                 
                 if isValid then
                     act = act + 1
                     if not X[u] then
                         X[u] = true
-                        Wk(d) -- Dispara notificação via Webhook se for um ovo novo válido
+                        Wk(d) 
                     end
                 end
                 
-                -- Renderiza ou atualiza o ESP com base na validade do filtro
                 if rawModel then
                     local pModel = rawModel
                     if pModel:IsA("Folder") then
@@ -589,15 +556,12 @@ task.spawn(function()
                 end
             end
             
-            -- Controlo do Auto Server Hop com base na ausência de ovos válidos
             if act > 0 then
                 lastValidEggTime = os.clock()
             elseif h.AH and (os.clock() - lastValidEggTime >= h.AHT) then
-                -- Removido o 99999 daqui! A trava agora é dentro do doServerHop.
                 task.spawn(doServerHop)
             end
             
-            -- Atualiza o painel de texto informativo na interface
             if stat then 
                 if h.AH and act == 0 then
                     local tempoRestante = math.max(0, math.floor(h.AHT - (os.clock() - lastValidEggTime)))
@@ -607,14 +571,19 @@ task.spawn(function()
                 end
             end
             
-            -- Remove da memória os elementos ESP de ovos que já foram apanhados ou saíram do mapa
+            -- Limpa da memória (ESP e Cache) os ovos que desapareceram do mapa
             for k, v in pairs(Z) do
                 if not pModels[k] or not v.M or not v.M.Parent then
-                    if v.H then pcall(function() v.H:Destroy() end) end
                     if v.B then pcall(function() v.B:Destroy() end) end
                     Z[k] = nil
                 end
             end
+            for k in pairs(cachedEggs) do
+                if not pModels[k] then
+                    cachedEggs[k] = nil
+                end
+            end
+            
         end)
     end
 end)
