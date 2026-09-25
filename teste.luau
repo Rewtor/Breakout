@@ -213,44 +213,37 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Estratégia Página 2: Servidores 101-200)
+-- 4. SISTEMA DE SERVER HOP (Estratégia Meio da Lista: 50 a 100)
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
     isHopping = true 
     
     pcall(function()
-        if stat then stat.Text = "Status: Acedendo à página secreta de servidores..." end
+        if stat then stat.Text = "Status: Procurando servidores 50 a 100..." end
+        -- Pede a lista normal de 100 servidores
+        local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
         
-        local baseUrl = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
-        
-        -- Primeira requisição: Pega os primeiros 100 servidores (os mais disputados)
-        local success1, result1 = pcall(function() 
-            return game:HttpGet(baseUrl .. "&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))) 
-        end)
-        
-        if success1 and result1 then
-            local data1 = a:JSONDecode(result1)
-            local targetData = data1.data -- Fallback de segurança: usa os primeiros 100 se o jogo estiver vazio
-            
-            -- Se existir a página 2 (ou seja, se houver servidores do 101 ao 200)
-            if data1 and data1.nextPageCursor then
-                local url2 = baseUrl .. "&cursor=" .. data1.nextPageCursor .. "&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
-                
-                -- Segunda requisição: Salta para os servidores 101 a 200
-                local success2, result2 = pcall(function() return game:HttpGet(url2) end)
-                if success2 and result2 then
-                    local data2 = a:JSONDecode(result2)
-                    if data2 and data2.data and #data2.data > 0 then
-                        targetData = data2.data -- Sucesso! Agora a nossa lista alvo são os servidores 101-200
-                    end
-                end
-            end
-            
-            if targetData then
+        local success, result = pcall(function() return game:HttpGet(url) end)
+        if success and result then
+            local data = a:JSONDecode(result)
+            if data and data.data then
                 local availableServers = {}
-                for _, v in ipairs(targetData) do
-                    -- Filtra para garantir que há vaga
+                local totalServers = #data.data
+                
+                -- Define onde vamos começar a olhar (ignora os primeiros 49)
+                local startIndex = 50
+                
+                -- Sistema de segurança: Se, de madrugada, o jogo tiver menos de 50 servidores no total,
+                -- o script percebe e começa do início (1) para não travar.
+                if totalServers < startIndex then
+                    startIndex = 1
+                end
+                
+                -- O loop começa no 50 e vai até o 100
+                for i = startIndex, totalServers do
+                    local v = data.data[i]
+                    -- Filtra para garantir que o servidor tem vaga
                     if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing < v.maxPlayers then
                         table.insert(availableServers, v.id)
                     end
@@ -258,10 +251,9 @@ local function doServerHop()
                 
                 if #availableServers > 0 then
                     math.randomseed(os.clock())
-                    -- Escolhe aleatoriamente de dentro dos 100 servidores da página selecionada
                     local randomServerId = availableServers[math.random(1, #availableServers)]
                     
-                    if stat then stat.Text = "Status: Teleportando (Lobby Escondido)..." end
+                    if stat then stat.Text = "Status: Teleportando (Lista 50-100)..." end
                     
                     TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
                     
@@ -278,7 +270,7 @@ local function doServerHop()
     end)
 end
 
-addBtn("Server Hop (Lista 100-200)", doServerHop)
+addBtn("Server Hop (Lista 50-100)", doServerHop)
 
 -- ========================================================
 -- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
