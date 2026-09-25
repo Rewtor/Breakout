@@ -213,83 +213,54 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Busca Profunda: Apenas 2 Pessoas)
+-- 4. SISTEMA DE SERVER HOP (Vazio e Anti-Erro 279)
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
-    isHopping = true 
+    isHopping = true -- Trava para não spammar
     
     pcall(function()
-        if stat then stat.Text = "Status: Folheando páginas (buscando 2 pessoas)..." end
+        if stat then stat.Text = "Status: Procurando servidor vazio (1 pessoa)..." end
+        -- Voltamos para Asc (crescente) para puxar os servidores mais vazios
+        local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
         
-        local baseUrl = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
-        local cursor = ""
-        local availableServers = {}
-        local pagesChecked = 0
-        local stopSearch = false
-        
-        -- Folheia até 20 páginas (2000 servidores) procurando o alvo
-        while pagesChecked < 20 and not stopSearch do
-            local currentUrl = baseUrl .. (cursor ~= "" and "&cursor=" .. cursor or "") .. "&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
-            
-            local success, result = pcall(function() return game:HttpGet(currentUrl) end)
-            if success and result then
-                local data = a:JSONDecode(result)
-                if data and data.data then
-                    for _, v in ipairs(data.data) do
-                        if type(v) == "table" and v.playing then
-                            -- Achou um server com 2 pessoas! Salva na lista.
-                            if v.playing == 1 and v.id ~= game.JobId and v.maxPlayers then
-                                table.insert(availableServers, v.id)
-                                
-                            -- Se começou a ver servers com 3 ou mais pessoas, significa que a zona do "2" já acabou. Para o loop!
-                            elseif v.playing > 1 then
-                                stopSearch = true 
-                            end
-                        end
+        local success, result = pcall(function() return game:HttpGet(url) end)
+        if success and result then
+            local data = a:JSONDecode(result)
+            if data and data.data then
+                local availableServers = {}
+                
+                for _, v in ipairs(data.data) do
+                    -- O SEGREDO: Pega servidores que tenham 1 ou 2 pessoas. 
+                    -- Isso garante que não é um servidor fantasma (0 pessoas) e mantém o mapa vazio pra você.
+                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 1 and v.playing < 2 then
+                        table.insert(availableServers, v.id)
                     end
-                    
-                    -- Se achou opções ou se passou do número 2, para de folhear as páginas
-                    if #availableServers > 0 or stopSearch then
-                        break
-                    end
-                    
-                    -- Prepara para pedir a próxima página ao Roblox
-                    if data.nextPageCursor then
-                        cursor = data.nextPageCursor
-                        pagesChecked = pagesChecked + 1
-                    else
-                        break -- Chegou ao fim da lista global de servidores
-                    end
-                else
-                    break
                 end
-            else
-                break
+                
+                if #availableServers > 0 then
+                    math.randomseed(os.clock())
+                    local randomServerId = availableServers[math.random(1, #availableServers)]
+                    if stat then stat.Text = "Status: Teleportando..." end
+                    
+                    TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
+                    
+                    -- Se o teleporte falhar, após 8 segundos ele destrava para tentar de novo
+                    task.delay(8, function()
+                        isHopping = false
+                        lastValidEggTime = os.clock() -- Reseta o timer suavemente
+                    end)
+                    return
+                end
             end
         end
-        
-        if #availableServers > 0 then
-            math.randomseed(os.clock())
-            -- Sorteia um servidor aleatório DENTRO da zona exclusiva de 2 jogadores
-            local randomServerId = availableServers[math.random(1, #availableServers)]
-            
-            if stat then stat.Text = "Status: Teleportando (Server de 2 pessoas)..." end
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
-            
-            task.delay(8, function()
-                isHopping = false
-                lastValidEggTime = os.clock() 
-            end)
-            return
-        end
-        
+        -- Se não achou servidor na lista, destrava imediatamente
         isHopping = false
-        if stat then stat.Text = "Status: Nenhum server com 2 pessoas. Tentando de novo..." end
+        if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
     end)
 end
 
-addBtn("Server Hop (Apenas 2 Pessoas)", doServerHop)
+addBtn("Server Hop (Servidor Vazio)", doServerHop)
 
 -- ========================================================
 -- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
