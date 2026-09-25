@@ -239,11 +239,11 @@ local function doServerHop()
                     for _, v in ipairs(data.data) do
                         if type(v) == "table" and v.playing then
                             -- Achou um server com 2 pessoas! Salva na lista.
-                            if v.playing == 2 and v.id ~= game.JobId and v.maxPlayers then
+                            if v.playing == 1 and v.id ~= game.JobId and v.maxPlayers then
                                 table.insert(availableServers, v.id)
                                 
                             -- Se começou a ver servers com 3 ou mais pessoas, significa que a zona do "2" já acabou. Para o loop!
-                            elseif v.playing > 2 then
+                            elseif v.playing > 1 then
                                 stopSearch = true 
                             end
                         end
