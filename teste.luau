@@ -213,15 +213,15 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Estratégia Meio da Lista: 50 a 100)
+-- 4. SISTEMA DE SERVER HOP (Estratégia Exclusiva: Exatamente 2 Jogadores)
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
     isHopping = true 
     
     pcall(function()
-        if stat then stat.Text = "Status: Procurando servidores 50 a 100..." end
-        -- Pede a lista normal de 100 servidores
+        if stat then stat.Text = "Status: Procurando servidor com 2 jogadores..." end
+        -- Pede a lista de servidores ordenados dos mais vazios para os mais cheios
         local url = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
         
         local success, result = pcall(function() return game:HttpGet(url) end)
@@ -229,32 +229,22 @@ local function doServerHop()
             local data = a:JSONDecode(result)
             if data and data.data then
                 local availableServers = {}
-                local totalServers = #data.data
                 
-                -- Define onde vamos começar a olhar (ignora os primeiros 49)
-                local startIndex = 50
-                
-                -- Sistema de segurança: Se, de madrugada, o jogo tiver menos de 50 servidores no total,
-                -- o script percebe e começa do início (1) para não travar.
-                if totalServers < startIndex then
-                    startIndex = 1
-                end
-                
-                -- O loop começa no 50 e vai até o 100
-                for i = startIndex, totalServers do
-                    local v = data.data[i]
-                    -- Filtra para garantir que o servidor tem vaga
-                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing < v.maxPlayers then
+                -- Varre todos os servidores entregues pela API
+                for _, v in ipairs(data.data) do
+                    -- FILTRO RESTRITO: Ignora 0, 1 e 3+. Adiciona apenas se tiver EXATAMENTE 2 pessoas.
+                    if type(v) == "table" and v.id ~= game.JobId and v.playing == 2 and v.maxPlayers then
                         table.insert(availableServers, v.id)
                     end
                 end
                 
+                -- Se encontrar pelo menos um servidor com 2 jogadores
                 if #availableServers > 0 then
                     math.randomseed(os.clock())
+                    -- Sorteia um servidor aleatório DENTRO da lista de servidores com 2 jogadores
                     local randomServerId = availableServers[math.random(1, #availableServers)]
                     
-                    if stat then stat.Text = "Status: Teleportando (Lista 50-100)..." end
-                    
+                    if stat then stat.Text = "Status: Teleportando (Server de 2 pessoas)..." end
                     TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
                     
                     task.delay(8, function()
@@ -266,11 +256,11 @@ local function doServerHop()
             end
         end
         isHopping = false
-        if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
+        if stat then stat.Text = "Status: Nenhum server com 2 pessoas. Tentando de novo..." end
     end)
 end
 
-addBtn("Server Hop (Lista 50-100)", doServerHop)
+addBtn("Server Hop (Apenas 2 Pessoas)", doServerHop)
 
 -- ========================================================
 -- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
