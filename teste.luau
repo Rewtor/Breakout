@@ -213,14 +213,14 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Busca Otimizada: Apenas 2 Pessoas)
+-- 4. SISTEMA DE SERVER HOP (Busca Profunda: Apenas 2 Pessoas)
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
     isHopping = true 
     
     pcall(function()
-        if stat then stat.Text = "Status: Procurando server com 2 pessoas..." end
+        if stat then stat.Text = "Status: Folheando páginas (buscando 2 pessoas)..." end
         
         local baseUrl = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
         local cursor = ""
@@ -228,8 +228,8 @@ local function doServerHop()
         local pagesChecked = 0
         local stopSearch = false
         
-        -- Folheia no máximo 10 páginas (1000 servidores) para não sobrecarregar
-        while pagesChecked < 10 and not stopSearch do
+        -- Folheia até 20 páginas (2000 servidores) procurando o alvo
+        while pagesChecked < 20 and not stopSearch do
             local currentUrl = baseUrl .. (cursor ~= "" and "&cursor=" .. cursor or "") .. "&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
             
             local success, result = pcall(function() return game:HttpGet(currentUrl) end)
@@ -242,7 +242,7 @@ local function doServerHop()
                             if v.playing == 2 and v.id ~= game.JobId and v.maxPlayers then
                                 table.insert(availableServers, v.id)
                                 
-                            -- Se começou a ver servers com 3 ou mais pessoas, a zona do "2" já acabou. Para o loop!
+                            -- Se começou a ver servers com 3 ou mais pessoas, significa que a zona do "2" já acabou. Para o loop!
                             elseif v.playing > 2 then
                                 stopSearch = true 
                             end
