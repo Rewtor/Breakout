@@ -226,9 +226,12 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Troca de Servidor Sem Cache)
+-- 4. SISTEMA DE SERVER HOP (Lógica Original com Trava Anti-Erro 769)
 -- ========================================================
 local function doServerHop()
+    if isHopping then return end
+    isHopping = true -- Aciona a trava para impedir o spam de teleporte
+    
     pcall(function()
         if stat then stat.Text = "Status: Procurando servidor vazio..." end
         -- Utiliza _nocache dinâmico para forçar o Roblox a entregar uma lista atualizada de servidores
@@ -250,16 +253,26 @@ local function doServerHop()
                     math.randomseed(os.clock())
                     local randomServerId = availableServers[math.random(1, #availableServers)]
                     if stat then stat.Text = "Status: Teleportando..." end
+                    
                     TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
+                    
+                    -- Se o teleporte demorar ou falhar, aguarda 8 segundos antes de destravar
+                    task.delay(8, function()
+                        isHopping = false
+                        lastValidEggTime = os.clock()
+                    end)
                     return
                 end
             end
         end
+        -- Se não achar nada, destrava em segurança para não ficar preso
+        isHopping = false
+        lastValidEggTime = os.clock()
         if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
     end)
 end
 
-addBtn("Server Hop (Servidor Vazio)", doServerHop)
+addBtn("Server Hop (Servidor Vazio v2)", doServerHop)
 
 -- ========================================================
 -- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
