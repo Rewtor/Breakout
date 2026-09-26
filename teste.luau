@@ -468,7 +468,7 @@ local function doServerHop()
 
                     -- Isso garante que não é um servidor fantasma (0 pessoas) e mantém o mapa vazio pra você.
 
-                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 1 and v.playing < 2 then
+                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 2 and v.playing < 3 then
 
                         table.insert(availableServers, v.id)
 
