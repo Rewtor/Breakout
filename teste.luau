@@ -427,22 +427,21 @@ end)
 
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Varredura Profunda: 3000 Servidores)
+-- 4. SISTEMA DE SERVER HOP (Busca Rápida com Paragem Inteligente)
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
     isHopping = true -- Trava para não spammar
     
     pcall(function()
-        if stat then stat.Text = "Status: Folheando 30 páginas de servidores..." end
+        if stat then stat.Text = "Status: Procurando servidores (Modo Rápido)..." end
         
         local baseUrl = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
         local cursor = ""
         local availableServers = {}
         local pagesLoaded = 0
-        local maxPages = 30 -- 30 páginas de 100 = 3000 servidores analisados
+        local maxPages = 30
         
-        -- Loop que vai folhear as páginas uma a uma
         while pagesLoaded < maxPages do
             local currentUrl = baseUrl
             if cursor ~= "" then
@@ -452,37 +451,39 @@ local function doServerHop()
             
             local success, result = pcall(function() return game:HttpGet(currentUrl) end)
             
-            if success and result then
-                local data = a:JSONDecode(result)
-                if data and data.data then
-                    
-                    -- Avalia os 100 servidores desta página
-                    for _, v in ipairs(data.data) do
-                        -- Mantém exatamente o seu filtro original (>= 2 e < 3)
-                        if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 2 and v.playing < 3 then
-                            table.insert(availableServers, v.id)
-                        end
+            -- Se a API do Roblox der erro (provável Rate Limit 429), pausa 1s e tenta a mesma página de novo
+            if not success or not result then
+                if stat then stat.Text = "Status: Roblox limitou a busca. Pausa de 1s..." end
+                task.wait(1)
+                continue
+            end
+            
+            local data = a:JSONDecode(result)
+            if data and data.data then
+                for _, v in ipairs(data.data) do
+                    -- Mantém o seu filtro original (>= 2 e < 3)
+                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 2 and v.playing < 3 then
+                        table.insert(availableServers, v.id)
                     end
-                    
-                    -- Prepara a próxima página, se existir
-                    if data.nextPageCursor then
-                        cursor = data.nextPageCursor
-                        pagesLoaded = pagesLoaded + 1
-                        
-                        -- Pausa de segurança anti-bloqueio (Evita Erro HTTP 429 do Roblox)
-                        task.wait(0.2)
-                    else
-                        break -- Chegou ao fim absoluto da lista de servidores do jogo
-                    end
-                else
+                end
+                
+                -- PARAGEM INTELIGENTE: Se achou 8 servidores ou mais, aborta a busca para poupar tempo!
+                if #availableServers >= 8 then
                     break
                 end
+                
+                if data.nextPageCursor then
+                    cursor = data.nextPageCursor
+                    pagesLoaded = pagesLoaded + 1
+                    -- Sem delays constantes! Vai direto para a próxima página na velocidade máxima.
+                else
+                    break -- Fim da lista global
+                end
             else
-                break -- Se a requisição falhar, sai do loop e usa os servidores que já encontrou
+                break
             end
         end
         
-        -- Após analisar as 30 páginas (ou todas disponíveis), faz o sorteio
         if #availableServers > 0 then
             math.randomseed(os.clock())
             local randomServerId = availableServers[math.random(1, #availableServers)]
@@ -498,7 +499,7 @@ local function doServerHop()
             return
         end
         
-        -- Se não achou servidor na lista inteira, destrava imediatamente
+        -- Se não achou servidor na lista, destrava imediatamente
         isHopping = false
         if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
     end)
