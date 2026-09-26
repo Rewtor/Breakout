@@ -462,7 +462,7 @@ local function doServerHop()
             if data and data.data then
                 for _, v in ipairs(data.data) do
                     -- Mantém o seu filtro original (>= 2 e < 3)
-                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 2 and v.playing < 3 then
+                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 1 and v.playing < 2 then
                         table.insert(availableServers, v.id)
                     end
                 end
