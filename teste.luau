@@ -34,7 +34,7 @@ local req = (syn and syn.request) or http_request or request or HttpPost
 
 -- ========================================================
 
-local h = {W="", P="", I=0, S=0, E=true, WH=false, AH=false, AHT=60}
+local h = {W="", P="", I=0, S=0, E=true, WH=false, AH=false, AHT=60, PC=1}
 
 local cfgFile = "DiceRadar_Config.json"
 
@@ -67,6 +67,8 @@ h.I = tonumber(h.I) or 0
 h.S = tonumber(h.S) or 0
 
 h.AHT = tonumber(h.AHT) or 60
+
+h.PC = tonumber(h.PC) or 1
 
 
 
@@ -224,7 +226,7 @@ stat.MouseButton1Click:Connect(function()
         main.Size = UDim2.new(0, 250, 0, 95)
         cont.Visible = false
     else
-        main.Size = UDim2.new(0, 250, 0, 515)
+        main.Size = UDim2.new(0, 250, 0, 550)
         cont.Visible = true
     end
 end)
@@ -247,6 +249,24 @@ addTog("Enable Webhooks", h.WH, function(v) h.WH = v end)
 addTog("Auto Server Hop", h.AH, function(v) 
     h.AH = v 
     lastValidEggTime = os.clock() 
+end)
+
+-- NOVO: Botão para alternar a quantidade de jogadores no Hop
+local fPC = Instance.new("Frame", cont)
+fPC.Size = UDim2.new(1, 0, 0, 30)
+fPC.BackgroundTransparency = 1
+local btnPC = Instance.new("TextButton", fPC)
+btnPC.Size = UDim2.new(1, -20, 1, 0)
+btnPC.Position = UDim2.new(0, 10, 0, 0)
+btnPC.BackgroundColor3 = Color3.fromRGB(255, 170, 0) -- Cor laranja para destacar
+btnPC.TextColor3 = Color3.fromRGB(20, 24, 34)
+btnPC.Font = Enum.Font.GothamBold
+btnPC.TextSize = 12
+btnPC.Text = "Buscar: " .. tostring(h.PC) .. " Jogador(es)"
+Instance.new("UICorner", btnPC).CornerRadius = UDim.new(0, 4)
+btnPC.MouseButton1Click:Connect(function()
+    h.PC = (h.PC == 1) and 2 or 1 -- Alterna entre 1 e 2
+    btnPC.Text = "Buscar: " .. tostring(h.PC) .. " Jogador(es)"
 end)
 
 addBtn("Testar Webhook", function()
@@ -307,7 +327,8 @@ local function doServerHop()
             if data and data.data then
                 for _, v in ipairs(data.data) do
                     -- Mantém o seu filtro original (>= 2 e < 3)
-                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing >= 1 and v.playing < 2 then
+                    -- NOVO: Filtra baseado no número de jogadores escolhido no HUD
+                    if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing == h.PC then
                         table.insert(availableServers, v.id)
                     end
                 end
