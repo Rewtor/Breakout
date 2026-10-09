@@ -588,8 +588,6 @@ local function Wk(d)
             
             -- Campos de conexão atualizados:
             {name = "🔗 Link de Join Automático", value = "[Abrir no seu site via Netlify](" .. joinLink .. ")", inline = false},
-            {name = "🆔 JobId (Para Copiar)", value = "```\n" .. tostring(jobId) .. "\n```", inline = true},
-            {name = "🚀 Script de Teleporte", value = "```lua\ngame:GetService('TeleportService'):TeleportToPlaceInstance("..tostring(placeId)..", '"..tostring(jobId).."', game.Players.LocalPlayer)\n```", inline = false}
         }
     }}
     
