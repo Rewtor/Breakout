@@ -556,65 +556,46 @@ end
 
 
 -- ========================================================
-
 -- 7. SISTEMA DE DISCORD WEBHOOK (Notificações)
-
 -- ========================================================
-
 local function Wk(d)
-
     if not h.WH or h.W == "" or not req then return end
 
-
-
     local playerName = o.Name
-
+    local placeId = game.PlaceId
+    local jobId = game.JobId
     
-
+    -- Link utilizando o seu site personalizado de Join
+    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
+    
     local m = ""
-
     if h.P ~= "" then 
-
         m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "** <@"..h.P..">" 
-
     else
-
         m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "** pega la"
-
     end
-
     
-
     local E = {{
-
         title = "🥚 Ovo Gigante DETECTADO!",
-
+        url = joinLink, -- Transforma o título do webhook num atalho direto pro seu site
         color = 65352,
-
         fields = {
-
             {name = "Categoria", value = d.C, inline = true},
-
             {name = "Area", value = d.A, inline = true},
-
             {name = "Raridade", value = d.Rar, inline = true},
-
             {name = "Tamanho", value = d.P, inline = true},
-
             {name = "Dinheiro/S", value = "$" .. formatNumber(d.R) .. "/s", inline = true},
-
+            
+            -- Campos de conexão atualizados:
+            {name = "🔗 Link de Join Automático", value = "[Abrir no seu site via Netlify](" .. joinLink .. ")", inline = false},
+            {name = "🆔 JobId (Para Copiar)", value = "```\n" .. tostring(jobId) .. "\n```", inline = true},
+            {name = "🚀 Script de Teleporte", value = "```lua\ngame:GetService('TeleportService'):TeleportToPlaceInstance("..tostring(placeId)..", '"..tostring(jobId).."', game.Players.LocalPlayer)\n```", inline = false}
         }
-
     }}
-
     
-
     pcall(function()
-
         req({Url = h.W, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = a:JSONEncode({content = m, embeds = E})})
-
     end)
-
 end
 
 
