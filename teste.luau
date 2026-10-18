@@ -14,6 +14,40 @@ local o = e.LocalPlayer
 local req = (syn and syn.request) or http_request or request or HttpPost
 
 -- ========================================================
+-- SISTEMA DE AUTO-UPDATE AUTOMÁTICO
+-- ========================================================
+task.spawn(function()
+    pcall(function()
+        -- Substitua o link abaixo pelo link RAW oficial do seu script atualizado (GitHub, Pastebin, etc.)
+        local updateURL = "https://raw.githubusercontent.com/Rewtor/Breakout/refs/heads/master/teste.luau" 
+        local scriptName = "DiceRadar_Update.lua"
+        
+        if game:HttpGet then
+            local success, newCode = pcall(function()
+                return game:HttpGet(updateURL)
+            end)
+            
+            if success and newCode and #newCode > 100 then
+                -- Opcional: Salva o arquivo localmente se o executor suportar
+                if writefile then
+                    pcall(function() writefile(scriptName, newCode) end)
+                end
+                
+                -- Executa o código novo imediatamente na memória
+                local fn, err = loadstring(newCode)
+                if fn then
+                    -- Destrói a interface antiga antes de carregar a nova para evitar duplicação
+                    if game:GetService("CoreGui"):FindFirstChild("DiceRadarGUI") then
+                        game:GetService("CoreGui").DiceRadarGUI:Destroy()
+                    end
+                    task.spawn(fn)
+                end
+            end
+        end
+    end)
+end)
+
+-- ========================================================
 -- 2. CONFIGURAÇÕES PADRÃO E GESTÃO DE FICHEIRO JSON
 -- ========================================================
 local h = {W="", P="", I=0, S=0, E=true, WH=false, AH=false, AHT=60, PC=1}
