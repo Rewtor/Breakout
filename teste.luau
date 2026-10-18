@@ -722,7 +722,7 @@ end
 
 
 -- ========================================================
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Turbinado V4)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Turbinado V4 - Correção Halloween Agressiva)
 -- ========================================================
 task.spawn(function()
     while task.wait(1.5) do
@@ -741,8 +741,7 @@ task.spawn(function()
             local function scanFolder(folder)
                 if not folder then return end
                 for _, v in ipairs(folder:GetChildren()) do
-                    -- ADICIONADO: "HalloweenEggUid" para detectar os ovos da nova dimensão
-                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v:GetAttribute("HalloweenEggUid")
+                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v:GetAttribute("HalloweenEggUid") or v:GetAttribute("Id") or v:GetAttribute("ID") or v:GetAttribute("EggId")
                     if not uidAttr and v.Name ~= "Model" and v.Name ~= "Part" then uidAttr = v.Name end
                     
                     if uidAttr then 
@@ -764,7 +763,7 @@ task.spawn(function()
                 end
             end
 
-            -- 3. BUSCA ESPECÍFICA DA DIMENSÃO DE HALLOWEEN (O Segredo!)
+            -- 3. BUSCA ESPECÍFICA DA DIMENSÃO DE HALLOWEEN
             local hwDimension = r:FindFirstChild("HalloweenDimension")
             if hwDimension then
                 local worldEggs = hwDimension:FindFirstChild("WorldEggs")
@@ -785,7 +784,7 @@ task.spawn(function()
                     if type(rawRec) == "table" then
                         for k, rec in pairs(rawRec) do
                             if type(rec) == "table" then
-                                local u = tostring(rec.Uid or rec.HalloweenEggUid or k)
+                                local u = tostring(rec.Uid or rec.HalloweenEggUid or rec.Id or rec.ID or k)
                                 records[u] = rec
                                 allUids[u] = true 
                             end
@@ -802,11 +801,12 @@ task.spawn(function()
                 total = total + 1
                 
                 if not cachedEggs[u] then
-                    -- CORREÇÃO: O 'cat' volta a ser a classe original para a matemática do jogo não falhar
-                    local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory"))) or rec.AssetCategory or rec.Category or "Egg"
+                    -- Categoria Base (A genérica que a matemática do jogo espera ler)
+                    local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.AssetCategory or rec.Category or rec.ItemName or "Egg"
                     
-                    -- NOVO: O 'displayCat' guarda o nome de Halloween para o Discord e ESP
-                    local displayCat = (rawModel and rawModel:GetAttribute("PreparedSourceName")) or rec.PreparedSourceName or cat
+                    -- Nome Visual (O nome real, como Crowshade, para o nosso radar e discord)
+                    local displayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("SourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or cat
+                    if displayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" then displayCat = rawModel.Name end
                     
                     local area = (rawModel and (rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rawModel:GetAttribute("Zone"))) or rec.AreaId or rec.Zone or "Unknown"
                     local rarity = getEggRarity(displayCat, rawModel, rec)
@@ -822,30 +822,80 @@ task.spawn(function()
                     
                     local real = 0
                     if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
+                        -- Tenta a matemática padrão enganando o sistema com vários nomes
                         pcall(function()
                             real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({
                                 Category = cat,
+                                ItemName = displayCat,
+                                Name = displayCat,
                                 Mutations = mAttr,
                                 Scale = scale
                             })) or 0
                         end)
+                        if real == 0 and displayCat ~= cat then
+                            pcall(function()
+                                real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({
+                                    Category = displayCat,
+                                    ItemName = cat,
+                                    Name = cat,
+                                    Mutations = mAttr,
+                                    Scale = scale
+                                })) or 0
+                            end)
+                        end
                     end
                     
                     if real == 0 then
-                        -- Adicionada verificação extra para atributos genéricos de eventos
-                        local base = rawModel and tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate") or rawModel:GetAttribute("BaseIncome") or rawModel:GetAttribute("EventIncome"))
-                        if not base then base = tonumber(rec.Income or rec.EarningRate or rec.MoneyPerSecond) end
-                        if (not base or base == 0) and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond) end
+                        -- Procura agressiva pelas variáveis de base escondidas nos eventos
+                        local base = rawModel and tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate") or rawModel:GetAttribute("BaseIncome") or rawModel:GetAttribute("MoneyPerSecond") or rawModel:GetAttribute("EventIncome") or rawModel:GetAttribute("Value") or rawModel:GetAttribute("Price"))
+                        if not base then base = tonumber(rec.Income or rec.EarningRate or rec.MoneyPerSecond or rec.BaseIncome or rec.Value or rec.Price) end
+                        if (not base or base == 0) and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income or rec.ItemData.EarningRate or rec.ItemData.Value or rec.ItemData.Price) end
                         
-                        if not base or base == 0 then
+                        -- VASCULHA O 3D: Procura variáveis de dinheiro fisicamente dentro do ovo
+                        if (not base or base == 0) and rawModel then
                             pcall(function()
-                                if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) end
-                                if (not base or base == 0) and pUtil and pUtil.Assets and pUtil.Assets[cat] then
-                                    local ast = pUtil.Assets[cat]
-                                    base = tonumber(ast.EarningRate or (ast.Egg and ast.Egg.EarningRate))
+                                for _, child in ipairs(rawModel:GetDescendants()) do
+                                    if child:IsA("NumberValue") or child:IsA("IntValue") then
+                                        local cName = string.lower(child.Name)
+                                        if cName == "income" or cName == "value" or cName == "price" or cName == "earningrate" or cName == "money" then
+                                            base = tonumber(child.Value)
+                                            if base and base > 0 then break end
+                                        end
+                                    end
                                 end
                             end)
                         end
+                        
+                        -- VASCULHA O BANCO DE DADOS: Invade o módulo de Assets do jogo para puxar tabelas secretas de Halloween
+                        if not base or base == 0 then
+                            pcall(function()
+                                local tryNames = {displayCat, cat, rawModel and rawModel.Name}
+                                for _, n in ipairs(tryNames) do
+                                    if not n or (base and base > 0) then continue end
+                                    
+                                    for key1, val1 in pairs(pUtil.Assets or {}) do
+                                        if type(val1) == "table" then
+                                            -- Match de 1º Nível
+                                            if tostring(key1) == n or val1.Name == n or val1.DisplayName == n then
+                                                base = tonumber(val1.EarningRate or (val1.Egg and val1.Egg.EarningRate) or val1.MoneyPerSecond or val1.Income or val1.Value or val1.Price) or 0
+                                                if base > 0 then break end
+                                            end
+                                            -- Match de 2º Nível (Subpastas como pUtil.Assets.HalloweenEggs["Crowshade"])
+                                            for key2, val2 in pairs(val1) do
+                                                if type(val2) == "table" then
+                                                    if tostring(key2) == n or val2.Name == n or val2.DisplayName == n then
+                                                        base = tonumber(val2.EarningRate or (val2.Egg and val2.Egg.EarningRate) or val2.MoneyPerSecond or val2.Income or val2.Value or val2.Price) or 0
+                                                        if base > 0 then break end
+                                                    end
+                                                end
+                                            end
+                                            if base and base > 0 then break end
+                                        end
+                                    end
+                                end
+                            end)
+                        end
+                        
                         base = base or 0
                         if base == 0 then base = 1 end
                         
@@ -870,7 +920,7 @@ task.spawn(function()
                     local pesoStr = peso and string.format("%.1f Kg", peso) or string.format("%.1fx", scale)
                     local checkSize = peso or scale or 0
                     
-                    -- Guarda todas as contas na memória! (Usando displayCat para aparecer bonito)
+                    -- Guarda todas as contas usando o nome real do ovo (displayCat) para o Discord!
                     cachedEggs[u] = {C=displayCat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
                 end
                 
