@@ -575,43 +575,22 @@ task.spawn(function()
             local function scanFolder(folder)
                 if not folder then return end
                 for _, v in ipairs(folder:GetChildren()) do
-                    -- Tenta pegar o UID oficial do ovo
-                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid")
-                    
-                    -- FILTRO DE SEGURANÇA: Se não tem UID, só aceita se tiver algum atributo de ovo
-                    if not uidAttr then
-                        if v:GetAttribute("Category") or v:GetAttribute("AssetCategory") or v:GetAttribute("Income") or v:GetAttribute("EarningRate") then
-                            uidAttr = v.Name
-                        end
-                    end
-
-                    -- Só adiciona na lista se passou no filtro (ignora paredes, árvores e zonas)
-                    if uidAttr then 
-                        pModels[tostring(uidAttr)] = v 
-                    end
+                    -- Regressamos ao método simples: se não tem UID, assume o nome do modelo.
+                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v.Name
+                    if uidAttr then pModels[tostring(uidAttr)] = v end
                 end
             end
             
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
             scanFolder(r:FindFirstChild("__DEBRIS"))
             
-            -- Varredura inteligente do Halloween: só olha pastas que realmente guardam ovos
+            -- O SEGREDO ESTÁ AQUI: Varrer APENAS a pasta "WorldEggs" e ignorar o resto do mapa.
+            -- O Dicionário Híbrido da Secção 5 vai encarregar-se de traduzir os nomes corretamente.
             local hwDimension = r:FindFirstChild("HalloweenDimension")
-            if hwDimension then
-                for _, child in ipairs(hwDimension:GetChildren()) do
-                    if child:IsA("Folder") or child:IsA("Model") then
-                        local n = string.lower(child.Name)
-                        -- Filtra para não ler o cenário (BorderCollision, Zones, etc)
-                        if string.find(n, "egg") or string.find(n, "pet") or string.find(n, "drop") then
-                            scanFolder(child)
-                        end
-                    end
-                end
-            end
             if hwDimension and hwDimension:FindFirstChild("WorldEggs") then
                 scanFolder(hwDimension.WorldEggs)
             end
-            
+
             local records = {}
             if s then
                 local st, fd = false, nil
