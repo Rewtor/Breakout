@@ -294,7 +294,6 @@ addBtn("Testar Webhook (V2)", function()
         fields = {
             {name = "👤 Conta Testando", value = "**" .. playerName .. "**", inline = true},
             {name = "🔗 Servidor Atual", value = "[Clique para Join (Netlify)](" .. joinLink .. ")", inline = true},
-            {name = "🆔 JobId", value = "```\n" .. tostring(jobId) .. "\n```", inline = false}
         }
     }}
     
