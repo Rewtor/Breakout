@@ -269,7 +269,7 @@ btnPC.MouseButton1Click:Connect(function()
     btnPC.Text = "Buscar: " .. tostring(h.PC) .. " Jogador(es)"
 end)
 
-addBtn("Testar Webhook", function()
+addBtn("Testar Webhook (V2)", function()
     if h.W == "" or not req then return end
     
     local playerName = o.Name
