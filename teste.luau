@@ -1,5 +1,5 @@
 -- ========================================================
--- RADAR V13 (HALLOWEEN DEFINITIVE PATCH + FULL ALIASES FIX)
+-- RADAR V14 (DYNAMIC NATIVE ASSET READING PATCH)
 -- ========================================================
 local e = game:GetService("Players")
 local r = game:GetService("Workspace")
@@ -229,7 +229,7 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook (V13)", function()
+addBtn("Testar Webhook (V14)", function()
     if h.W == "" or not req then return end
     
     local playerName = o.Name
@@ -523,45 +523,11 @@ local function Dk(u, m, d, isValid)
 end
 
 -- ========================================================
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Definitivo V13)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Dinâmico V14)
 -- ========================================================
 task.spawn(function()
     
-    -- 🎃 BASE DE DADOS SUPREMA DE HALLOWEEN 🎃
-    local HalloweenDB = {
-        ["Hexed Pumpkin"] = {Base = 150000000, Rar = "Cosmic"},
-        ["Graveyard Brute"] = {Base = 75000000, Rar = "Secret"},
-        ["Toadstool"] = {Base = 1600000, Rar = "Mythic"},
-        ["Haunted Scorpio"] = {Base = 30000000, Rar = "Cosmic"},
-        ["Crowshade"] = {Base = 4500000, Rar = "Mythic"},
-        ["Shelltide Voyager"] = {Base = 1600000000, Rar = "Eternal"},
-        ["Halloween Gigantopithecus"] = {Base = 1500000000, Rar = "Eternal"},
-        ["Werewolf"] = {Base = 1300000000, Rar = "Secret"},
-        ["Mimic Chest"] = {Base = 600000, Rar = "Legendary"},
-        ["Zombified Halloween Glyptodon"] = {Base = 800000000, Rar = "Secret"},
-        ["Zombified Halloween Dunkleosteus"] = {Base = 4000000000, Rar = "Eternal"},
-        ["BloodBloom"] = {Base = 450000000, Rar = "Secret"},
-        ["Hooded Gerbil"] = {Base = 300000, Rar = "Legendary"},
-        ["Ghost Reaper"] = {Base = 300000000, Rar = "Eternal"},
-        ["Abomination Kong"] = {Base = 3500000000, Rar = "Eternal"},
-        ["Patchwork Imp"] = {Base = 20000000, Rar = "Cosmic"},
-        ["Voidseer Pumpkin"] = {Base = 14000000000, Rar = "Divine"},
-        ["Halloween Terrorbird"] = {Base = 160000, Rar = "Mythic"},
-        ["Halloween Dunkleosteus"] = {Base = 450000000, Rar = "Secret"},
-        ["Zombified Halloween Terrorbird"] = {Base = 1100000000, Rar = "Secret"},
-        ["Zombified Halloween Gigantopithecus"] = {Base = 6000000000, Rar = "Eternal"},
-        ["Candlefang"] = {Base = 225000, Rar = "Mythic"},
-        ["Jesterpop"] = {Base = 40000, Rar = "Legendary"},
-        ["Whiskers"] = {Base = 2000, Rar = "Epic"},
-        ["Zombified Halloween Sabertooth"] = {Base = 14000000000, Rar = "Divine"},
-        ["Halloween Sabertooth"] = {Base = 7500000000, Rar = "Divine"},
-        ["Halloween Glyptodon"] = {Base = 35000, Rar = "Legendary"},
-        ["Spirit Knight"] = {Base = 3000000, Rar = "Cosmic"},
-        ["Zombified Halloween Megatherium"] = {Base = 1400000000, Rar = "Secret"},
-        ["Halloween Megatherium"] = {Base = 6000000, Rar = "Cosmic"},
-    }
-
-    -- 🔄 DICIONÁRIO DE SINÓNIMOS (ALIASES) COMPLETO 🔄
+    -- 🔄 DICIONÁRIO DE SINÓNIMOS (ALIASES) PARA CORREÇÃO DE NOMES
     local EggAliases = {
         ["Rotshroom"] = "Toadstool",
         ["Rotshroom Egg"] = "Toadstool",
@@ -654,7 +620,7 @@ task.spawn(function()
                         end
                     end
                     
-                    -- APLICA OS ALIASES DE NOME COMPLETO
+                    -- APLICA OS ALIASES DE NOME
                     local cat = EggAliases[rawCat] or rawCat
                     local displayCat = EggAliases[rawDisplayCat] or rawDisplayCat
                     local rName = rawModel and (EggAliases[rawModel.Name] or rawModel.Name)
@@ -679,37 +645,30 @@ task.spawn(function()
                     local real, base = 0, 0
                     local rarity = "Unknown"
                     
-                    -- 🚀 VERIFICAÇÃO NA BASE DE DADOS SUPREMA DE HALLOWEEN 🚀
-                    local hwData = HalloweenDB[displayCat] or HalloweenDB[cat] or (rName and HalloweenDB[rName])
-                    
-                    if hwData then
-                        base = hwData.Base
-                        rarity = hwData.Rar
-                    else
-                        local tryNames = {displayCat, cat, rName}
-                        for _, n in ipairs(tryNames) do
-                            if not n or base > 0 then continue end
-                            if hwPets and hwPets.Specs and hwPets.Specs[n] then
-                                base = tonumber(hwPets.Specs[n].EarningRate) or 0
-                            end
-                            if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
-                                base = tonumber(assetsMod.Directory[n].EarningRate) or 0
-                            end
-                            if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
-                                base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
-                            end
-                            if base == 0 and pUtil and pUtil.Assets and pUtil.Assets[n] then
-                                base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
-                            end
+                    -- 🔍 LEITURA DINÂMICA NATIVA DIRETO DOS MÓDULOS DO JOGO
+                    local tryNames = {displayCat, cat, rName}
+                    for _, n in ipairs(tryNames) do
+                        if not n or base > 0 then continue end
+                        if hwPets and hwPets.Specs and hwPets.Specs[n] then
+                            base = tonumber(hwPets.Specs[n].EarningRate) or 0
                         end
-                        
-                        if base == 0 then
-                            base = tonumber((rawModel and (rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))) or rec.Income or rec.EarningRate or rec.MoneyPerSecond) or 0
-                            if base == 0 and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income) or 0 end
+                        if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
+                            base = tonumber(assetsMod.Directory[n].EarningRate) or 0
                         end
-                        
-                        rarity = getEggRarity(displayCat, rawModel, rec)
+                        if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
+                            base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
+                        end
+                        if base == 0 and pUtil and pUtil.Assets and pUtil.Assets[n] then
+                            base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
+                        end
                     end
+                    
+                    if base == 0 then
+                        base = tonumber((rawModel and (rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))) or rec.Income or rec.EarningRate or rec.MoneyPerSecond) or 0
+                        if base == 0 and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income) or 0 end
+                    end
+                    
+                    rarity = getEggRarity(displayCat, rawModel, rec)
                     
                     base = (base == 0) and 1 or base
                     
@@ -728,7 +687,7 @@ task.spawn(function()
                     
                     real = math.floor((base * scaleMult * mutMult) + 0.5)
 
-                    if not hwData and AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
+                    if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
                         local nativeReal = 0
                         pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
                         if nativeReal == 0 and displayCat ~= cat then
