@@ -1,93 +1,50 @@
 -- ========================================================
-
 -- 1. IMPORTAÇÃO DOS SERVIÇOS DO ROBLOX
-
 -- ========================================================
-
 local e = game:GetService("Players")
-
 local r = game:GetService("Workspace")
-
 local y = game:GetService("RunService")
-
 local a = game:GetService("HttpService")
-
 local c = game:GetService("CoreGui")
-
 local w = game:GetService("UserInputService")
-
 local j = game:GetService("ReplicatedStorage")
-
 local TeleportService = game:GetService("TeleportService")
-
 local o = e.LocalPlayer
-
-
 
 local req = (syn and syn.request) or http_request or request or HttpPost
 
-
-
 -- ========================================================
-
 -- 2. CONFIGURAÇÕES PADRÃO E GESTÃO DE FICHEIRO JSON
-
 -- ========================================================
-
 local h = {W="", P="", I=0, S=0, E=true, WH=false, AH=false, AHT=60, PC=1}
-
 local cfgFile = "DiceRadar_Config.json"
 
-
-
 if isfile and readfile and isfile(cfgFile) then
-
     pcall(function()
-
         local saved = a:JSONDecode(readfile(cfgFile))
-
         if type(saved) == "table" then
-
             for k, v in pairs(saved) do
-
                 h[k] = v
-
             end
-
         end
-
     end)
-
 end
 
-
-
 h.I = tonumber(h.I) or 0
-
 h.S = tonumber(h.S) or 0
-
 h.AHT = tonumber(h.AHT) or 60
-
 h.PC = tonumber(h.PC) or 1
 
-
-
 local X = {} 
-
 local Z = {} 
-
-local cachedEggs = {} -- OTIMIZAÇÃO MAXIMA: Memória para não fritar o CPU do dispositivo
-
+local cachedEggs = {} 
 local b = 0  
-
 local isHopping = false 
-
 local lastReset = os.clock()
-
 local lastValidEggTime = os.clock() 
 
 -- ========================================================
--- 3. CONSTRUÇÃO DA INTERFACE GRÁFICA (GUI) - MINIMIZÁVEL
+-- 3. CONSTRUÇÃO DA INTERFACE GRÁFICA (GUI)
 -- ========================================================
 if c:FindFirstChild("DiceRadarGUI") then c.DiceRadarGUI:Destroy() end
 
@@ -95,9 +52,9 @@ local gui = Instance.new("ScreenGui", c)
 gui.Name = "DiceRadarGUI"
 
 local main = Instance.new("Frame", gui)
-main.Size = UDim2.new(0, 250, 0, 95) -- Inicia com o tamanho minimizado (30 do topo + 60 do status + 5 margem)
+main.Size = UDim2.new(0, 250, 0, 95)
 main.AnchorPoint = Vector2.new(0, 0)
-main.Position = UDim2.new(0, 20, 0, 20) -- Fixado no canto superior esquerdo
+main.Position = UDim2.new(0, 20, 0, 20)
 main.BackgroundColor3 = Color3.fromRGB(20, 24, 34)
 main.BorderSizePixel = 0
 main.Active = true
@@ -120,13 +77,12 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 13
 title.TextXAlignment = Enum.TextXAlignment.Left
 
--- O container das configurações agora começa abaixo do texto de status e inicia invisível
 local cont = Instance.new("ScrollingFrame", main)
 cont.Size = UDim2.new(1, 0, 1, -95)
 cont.Position = UDim2.new(0, 0, 0, 95)
 cont.BackgroundTransparency = 1
 cont.ScrollBarThickness = 2
-cont.Visible = false -- Inicia minimizado
+cont.Visible = false
 local lay = Instance.new("UIListLayout", cont)
 lay.Padding = UDim.new(0, 5)
 lay.SortOrder = Enum.SortOrder.LayoutOrder
@@ -204,12 +160,11 @@ local function addBtn(txt, cb)
     btn.MouseButton1Click:Connect(cb)
 end
 
--- O stat agora é um TextButton fixado no main, permitindo clique para abrir o menu
 local stat = Instance.new("TextButton", main)
 stat.Size = UDim2.new(1, -20, 0, 60)
-stat.Position = UDim2.new(0, 10, 0, 30) -- Posicionado sempre visível logo abaixo da barra superior
+stat.Position = UDim2.new(0, 10, 0, 30)
 stat.BackgroundTransparency = 1
-stat.AutoButtonColor = false -- Evita efeito visual indesejado ao clicar
+stat.AutoButtonColor = false
 stat.Text = "Status: Waiting...\nOvos no Mapa: 0\nValidos: 0 | Melhor: $0/s"
 stat.TextColor3 = Color3.fromRGB(0, 255, 160)
 stat.Font = Enum.Font.GothamBold
@@ -218,7 +173,6 @@ stat.TextXAlignment = Enum.TextXAlignment.Left
 stat.TextYAlignment = Enum.TextYAlignment.Top
 stat.TextWrapped = true
 
--- Lógica para maximizar e minimizar o painel clicando no texto de status
 local isMinimized = true
 stat.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
@@ -237,7 +191,6 @@ addBox("Min Real Income ($/s)", h.I, function(v) h.I = tonumber(v) or 0 end)
 addBox("Min Scale ou Kg", h.S, function(v) h.S = tonumber(v) or 0 end)
 addBox("Auto Hop Timer (s)", h.AHT, function(v) h.AHT = tonumber(v) or 60 end)
 
--- ESP Toggle sem Highlight
 addTog("Enable ESP", h.E, function(v) 
     h.E = v 
     for k, esp in pairs(Z) do
@@ -251,33 +204,78 @@ addTog("Auto Server Hop", h.AH, function(v)
     lastValidEggTime = os.clock() 
 end)
 
--- NOVO: Botão para alternar a quantidade de jogadores no Hop
 local fPC = Instance.new("Frame", cont)
 fPC.Size = UDim2.new(1, 0, 0, 30)
 fPC.BackgroundTransparency = 1
 local btnPC = Instance.new("TextButton", fPC)
 btnPC.Size = UDim2.new(1, -20, 1, 0)
 btnPC.Position = UDim2.new(0, 10, 0, 0)
-btnPC.BackgroundColor3 = Color3.fromRGB(255, 170, 0) -- Cor laranja para destacar
+btnPC.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
 btnPC.TextColor3 = Color3.fromRGB(20, 24, 34)
 btnPC.Font = Enum.Font.GothamBold
 btnPC.TextSize = 12
 btnPC.Text = "Buscar: " .. tostring(h.PC) .. " Jogador(es)"
 Instance.new("UICorner", btnPC).CornerRadius = UDim.new(0, 4)
 btnPC.MouseButton1Click:Connect(function()
-    h.PC = (h.PC == 1) and 2 or 1 -- Alterna entre 1 e 2
+    h.PC = (h.PC == 1) and 2 or 1
     btnPC.Text = "Buscar: " .. tostring(h.PC) .. " Jogador(es)"
 end)
 
-addBtn("Testar Webhook", function()
+local function formatNumber(n)
+    if n >= 1e12 then return string.format("%.2fT", n/1e12) end
+    if n >= 1e9 then return string.format("%.2fB", n/1e9) end
+    if n >= 1e6 then return string.format("%.2fM", n/1e6) end
+    if n >= 1e3 then return string.format("%.1fk", n/1e3) end
+    return tostring(math.floor(n))
+end
+
+-- V1: NOVO BOTÃO DE TESTE DE WEBHOOK
+addBtn("Testar Webhook (V1)", function()
     if h.W == "" or not req then return end
+    
+    local playerName = o.Name
+    local placeId = game.PlaceId
+    local jobId = game.JobId
+    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
+
+    local eggList = {}
+    for u, d in pairs(cachedEggs) do
+        table.insert(eggList, d)
+    end
+    table.sort(eggList, function(a, b) return (a.R or 0) > (b.R or 0) end)
+    
+    local eggString = ""
+    local maxList = 15
+    for i, d in ipairs(eggList) do
+        if i > maxList then 
+            eggString = eggString .. string.format("\n*... e mais %d ovos escondidos*", #eggList - maxList)
+            break 
+        end
+        eggString = eggString .. string.format("• **%s** (%s) | $%s/s\n", d.C, d.P, formatNumber(d.R))
+    end
+    
+    if #eggList == 0 then
+        eggString = "Nenhum ovo carregado no mapa no momento."
+    end
+
     local m = ""
-    if h.P ~= "" then m = "Teste de Ping! <@"..h.P..">" end
+    if h.P ~= "" then 
+        m = "Teste de Ping do Radar! <@"..h.P..">" 
+    else
+        m = "Teste de Ping do Radar!"
+    end
+    
     local E = {{
         title = "✅ Conexão Estabelecida!",
-        description = "O Webhook do Dice Radar está a funcionar perfeitamente e pronto a detetar ovos.",
-        color = 65352
+        description = "O Webhook do Dice Radar está configurado.\n\n**📋 Top Ovos no Mapa Atual:**\n" .. eggString,
+        url = joinLink,
+        color = 65352,
+        fields = {
+            {name = "👤 Conta Testando", value = "**" .. playerName .. "**", inline = true},
+            {name = "🔗 Servidor Atual", value = "[Clique para Join (Netlify)](" .. joinLink .. ")", inline = true},
+        }
     }}
+    
     pcall(function()
         req({Url=h.W, Method="POST", Headers={["Content-Type"]="application/json"}, Body=a:JSONEncode({content=m, embeds=E})})
     end)
@@ -292,11 +290,11 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Busca Rápida com Paragem Inteligente)
+-- 4. SISTEMA DE SERVER HOP
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
-    isHopping = true -- Trava para não spammar
+    isHopping = true 
     
     pcall(function()
         if stat then stat.Text = "Status: Procurando servidores (Modo Rápido)..." end
@@ -316,7 +314,6 @@ local function doServerHop()
             
             local success, result = pcall(function() return game:HttpGet(currentUrl) end)
             
-            -- Se a API do Roblox der erro (provável Rate Limit 429), pausa 1s e tenta a mesma página de novo
             if not success or not result then
                 if stat then stat.Text = "Status: Roblox limitou a busca. Pausa de 1s..." end
                 task.wait(1)
@@ -326,14 +323,11 @@ local function doServerHop()
             local data = a:JSONDecode(result)
             if data and data.data then
                 for _, v in ipairs(data.data) do
-                    -- Mantém o seu filtro original (>= 2 e < 3)
-                    -- NOVO: Filtra baseado no número de jogadores escolhido no HUD
                     if type(v) == "table" and v.id ~= game.JobId and v.playing and v.maxPlayers and v.playing == h.PC then
                         table.insert(availableServers, v.id)
                     end
                 end
                 
-                -- PARAGEM INTELIGENTE: Se achou 8 servidores ou mais, aborta a busca para poupar tempo!
                 if #availableServers >= 8 then
                     break
                 end
@@ -341,9 +335,8 @@ local function doServerHop()
                 if data.nextPageCursor then
                     cursor = data.nextPageCursor
                     pagesLoaded = pagesLoaded + 1
-                    -- Sem delays constantes! Vai direto para a próxima página na velocidade máxima.
                 else
-                    break -- Fim da lista global
+                    break
                 end
             else
                 break
@@ -357,15 +350,13 @@ local function doServerHop()
             if stat then stat.Text = "Status: Teleportando..." end
             TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
             
-            -- Se o teleporte falhar, após 8 segundos ele destrava para tentar de novo
             task.delay(8, function()
                 isHopping = false
-                lastValidEggTime = os.clock() -- Reseta o timer suavemente
+                lastValidEggTime = os.clock()
             end)
             return
         end
         
-        -- Se não achou servidor na lista, destrava imediatamente
         isHopping = false
         if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
     end)
@@ -373,10 +364,8 @@ end
 
 addBtn("Server Hop (Servidor Vazio)", doServerHop)
 
-
-
 -- ========================================================
--- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
+-- 5. CARREGAMENTO DOS MÓDULOS E TRADUÇÃO DINÂMICA
 -- ========================================================
 local s = nil pcall(function() s = require(j:WaitForChild("Client", 5):WaitForChild("EggState", 5)) end)
 if not s then pcall(function() s = require(j.Client.EggState) end) end
@@ -390,163 +379,96 @@ if not AssetEarnings then pcall(function() AssetEarnings = require(j.Shared.Util
 local mutModule = nil pcall(function() mutModule = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Mutations", 5)) end)
 if not mutModule then pcall(function() mutModule = require(j.Shared.Modules.Mutations) end) end
 
--- NOVO: Importando os módulos de Halloween e novos Assets
 local hPets = nil pcall(function() hPets = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("HalloweenPets", 5)) end)
 if not hPets then pcall(function() hPets = require(j.Shared.Modules.HalloweenPets) end) end
 
 local newAssets = nil pcall(function() newAssets = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Assets", 5)) end)
 if not newAssets then pcall(function() newAssets = require(j.Shared.Modules.Assets) end) end
 
--- NOVO: Dicionário de tradução inteligente
 local nameTranslation = {}
 pcall(function()
-    -- Mapeia os pets de Halloween
+    local function mapData(realName, data)
+        if data.Source then nameTranslation[data.Source] = realName end
+        if data.EggSource then nameTranslation[data.EggSource] = realName end
+        if data.EggModel then nameTranslation[data.EggModel] = realName end
+        if data.DisplayName then nameTranslation[data.DisplayName] = realName end
+    end
+
     if hPets and hPets.Specs then
         for realName, data in pairs(hPets.Specs) do
-            if data.Source then nameTranslation[data.Source] = realName end
-            if data.EggSource then nameTranslation[data.EggSource] = realName end
-            if data.EggModel then nameTranslation[data.EggModel] = realName end
+            mapData(realName, data)
         end
     end
-    -- Mapeia os Assets gerais (agora usando .Directory)
     if newAssets and newAssets.Directory then
         for realName, data in pairs(newAssets.Directory) do
-            if data.Source then nameTranslation[data.Source] = realName end
-            if data.EggSource then nameTranslation[data.EggSource] = realName end
-            if data.EggModel then nameTranslation[data.EggModel] = realName end
+            mapData(realName, data)
         end
     end
 end)
 
-local function formatNumber(n)
-    if n >= 1e12 then return string.format("%.2fT", n/1e12) end
-    if n >= 1e9 then return string.format("%.2fB", n/1e9) end
-    if n >= 1e6 then return string.format("%.2fM", n/1e6) end
-    if n >= 1e3 then return string.format("%.1fk", n/1e3) end
-    return tostring(math.floor(n))
-end
-
-
 -- ========================================================
-
 -- 6. EXTRAÇÃO INTELIGENTE DE RARIDADE DOS OVOS
-
 -- ========================================================
-
 local function getEggRarity(cat, rawModel, rec)
-
     local rar = "Unknown"
-
     if rawModel then 
-
         rar = rawModel:GetAttribute("Rarity") or rawModel:GetAttribute("RarityTier") or rawModel:GetAttribute("Tier") or rar 
-
     end
-
     if rar == "Unknown" and rec and rec.Rarity then 
-
         rar = rec.Rarity 
-
     end
-
     if type(rar) == "table" then 
-
         rar = rar.DisplayName or rar.Name or rar._id or "Unknown" 
-
     end
-
--- NOVO: Busca nos módulos novos (Halloween e Assets)
+    
+    if rar == "Unknown" then
+        pcall(function()
+            if pUtil and pUtil.Assets and pUtil.Assets[cat] then
+                local ast = pUtil.Assets[cat]
+                local rData = ast.Rarity or (ast.Egg and ast.Egg.Rarity)
+                if type(rData) == "table" then rar = rData.DisplayName or rData.Name or rData._id or "Unknown"
+                elseif type(rData) == "string" then rar = rData end
+            end
             if rar == "Unknown" then
                 local ast = (hPets and hPets.Specs and hPets.Specs[cat]) or (newAssets and newAssets.Directory and newAssets.Directory[cat])
                 if ast then
                     local rData = ast.Rarity or (ast.Egg and ast.Egg.Rarity)
-                    if type(rData) == "table" then 
-                        rar = rData.DisplayName or rData.Name or rData._id or "Unknown"
-                    elseif type(rData) == "string" then 
-                        rar = rData 
-                    end
+                    if type(rData) == "table" then rar = rData.DisplayName or rData.Name or rData._id or "Unknown"
+                    elseif type(rData) == "string" then rar = rData end
                 end
             end
-
+        end)
+    end
     rar = tostring(rar)
-
     
-
     local searchStr = string.lower(string.format("%s %s %s", tostring(cat), tostring(rec and rec.Uid or ""), tostring(rawModel and rawModel.Name or "")))
-
     local lowerRar = string.lower(rar)
-
     
-
     local function checkMatch(str)
-
         if string.find(str, "divine") then return "Divine" end
-
         if string.find(str, "eternal") then return "Eternal" end
-
         if string.find(str, "secret") then return "Secret" end
-
         if string.find(str, "cosmic") then return "Cosmic" end
-
         if string.find(str, "mythic") then return "Mythic" end
-
         if string.find(str, "legendary") then return "Legendary" end
-
         if string.find(str, "epic") then return "Epic" end
-
         if string.find(str, "rare") then return "Rare" end
-
         if string.find(str, "uncommon") then return "Uncommon" end
-
         if string.find(str, "common") then return "Common" end
-
         return nil
-
     end
 
-
-
     local match = checkMatch(lowerRar)
-
     if match then return match end
-
     match = checkMatch(searchStr)
-
     if match then return match end
-
     
-
-    if string.find(searchStr, "nightflame") or string.find(searchStr, "unicornegg") or string.find(searchStr, "unicorn egg") or string.find(searchStr, "shatteredcolossus") or string.find(searchStr, "kitsune") or string.find(searchStr, "elmaja") or string.find(searchStr, "el maja") then return "Divine" end
-
-    if string.find(searchStr, "gorillaking") or string.find(searchStr, "gorilla king") or string.find(searchStr, "lunardragon") or string.find(searchStr, "lunar dragon") or string.find(searchStr, "onitiger") or string.find(searchStr, "oni tiger") or string.find(searchStr, "mosasaurus") then return "Eternal" end
-
-    if string.find(searchStr, "mutantshark") or string.find(searchStr, "mutant shark") or string.find(searchStr, "skeletonboss") or string.find(searchStr, "skeleton boss") or string.find(searchStr, "stagegg") or string.find(searchStr, "stag egg") or string.find(searchStr, "cosmicdragon") or string.find(searchStr, "cosmic dragon") or string.find(searchStr, "trex") or string.find(searchStr, "t-rex") or string.find(searchStr, "tralaledon") or string.find(searchStr, "kraken") then return "Secret" end
-
-    if string.find(searchStr, "saturnita") or string.find(searchStr, "saturno") or string.find(searchStr, "mantaris") or string.find(searchStr, "mantis") or string.find(searchStr, "moth") or string.find(searchStr, "imp") or string.find(searchStr, "rhinotaur") or string.find(searchStr, "snowyowl") or string.find(searchStr, "snowy owl") or string.find(searchStr, "koiegg") or string.find(searchStr, "koi egg") or string.find(searchStr, "triceratops") or string.find(searchStr, "bronto") or string.find(searchStr, "whaleshark") or string.find(searchStr, "whale shark") or string.find(searchStr, "belugawhale") or string.find(searchStr, "beluga whale") then return "Cosmic" end
-
-    if string.find(searchStr, "bladehide") or string.find(searchStr, "redpanda") or string.find(searchStr, "red panda") or string.find(searchStr, "cosmicgorilla") or string.find(searchStr, "cosmic gorilla") or string.find(searchStr, "ankylosaurus") or string.find(searchStr, "orca") then return "Mythic" end
-
-    if string.find(searchStr, "spideron") or string.find(searchStr, "crustacia") or string.find(searchStr, "salamander") or string.find(searchStr, "cosmicgecko") or string.find(searchStr, "cosmic gecko") or string.find(searchStr, "pterodactyl") or string.find(searchStr, "sharkegg") or string.find(searchStr, "shark egg") then return "Legendary" end
-
-    if string.find(searchStr, "crane") or string.find(searchStr, "centapede") or string.find(searchStr, "swordfish") then return "Epic" end
-
-    if string.find(searchStr, "dodo") or string.find(searchStr, "parrotfish") then return "Rare" end
-
-
-
     local income = tonumber(rec and rec.EarningRate or rec and rec.Income or rawModel and rawModel:GetAttribute("Income") or 0)
-
     if income and income >= 150000000 then return "Secret" end
 
-
-
     if rar ~= "Unknown" then return rar end
-
     return "Normal"
-
 end
-
-
 
 -- ========================================================
 -- 7. SISTEMA DE DISCORD WEBHOOK (Notificações)
@@ -558,7 +480,6 @@ local function Wk(d)
     local placeId = game.PlaceId
     local jobId = game.JobId
     
-    -- Link utilizando o seu site personalizado de Join
     local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
     
     local m = ""
@@ -570,7 +491,7 @@ local function Wk(d)
     
     local E = {{
         title = "🥚 Ovo Gigante DETECTADO!",
-        url = joinLink, -- Transforma o título do webhook num atalho direto pro seu site
+        url = joinLink,
         color = 65352,
         fields = {
             {name = "Categoria", value = d.C, inline = true},
@@ -578,8 +499,6 @@ local function Wk(d)
             {name = "Raridade", value = d.Rar, inline = true},
             {name = "Tamanho", value = d.P, inline = true},
             {name = "Dinheiro/S", value = "$" .. formatNumber(d.R) .. "/s", inline = true},
-            
-            -- Campos de conexão atualizados:
             {name = "🔗 Link de Join Automático", value = "[Abrir no seu site via Netlify](" .. joinLink .. ")", inline = false},
         }
     }}
@@ -589,417 +508,230 @@ local function Wk(d)
     end)
 end
 
-
-
 -- ========================================================
-
--- 8. SISTEMA DE ESP VISUAL (Apenas Texto - Sem Highlight)
-
+-- 8. SISTEMA DE ESP VISUAL
 -- ========================================================
-
 local function Dk(u, m, d, isValid)
-
     if not m then return end
-
     
-
     local isVisible = h.E and isValid
 
-
-
     if Z[u] then 
-
         if Z[u].B and Z[u].B:FindFirstChild("TextLabel") then
-
             Z[u].B.TextLabel.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P)
-
         end
-
         if Z[u].B then pcall(function() Z[u].B.Enabled = isVisible end) end
-
         return 
-
     end
-
     
-
     if not isVisible then return end
-
     
-
-    -- Criação apenas do BillboardGui (Texto flutuante acima do ovo)
-
     local bb = Instance.new("BillboardGui", m)
-
     bb.Size = UDim2.new(0, 150, 0, 50)
-
     bb.StudsOffset = Vector3.new(0, 4, 0)
-
     bb.AlwaysOnTop = true
-
     bb.Enabled = true
-
     
-
     local tl = Instance.new("TextLabel", bb)
-
     tl.Size = UDim2.new(1, 0, 1, 0)
-
     tl.BackgroundTransparency = 1
-
     tl.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P)
-
     tl.TextColor3 = Color3.fromRGB(0, 195, 255)
-
     tl.TextStrokeTransparency = 0.2
-
     tl.Font = Enum.Font.GothamBold
-
     tl.TextSize = 11
-
     
-
     Z[u] = {B = bb, M = m}
-
 end
 
-
-
 -- ========================================================
-
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Otimizado)
-
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Otimizado + Preciso)
 -- ========================================================
-
 task.spawn(function()
-
     while task.wait(1.5) do
-
         pcall(function()
-
             local act = 0
-
             local total = 0
-
             
-
             if os.clock() - lastReset >= 10 then
-
                 b = 0
-
                 lastReset = os.clock()
-
             end
-
             
-
             local pModels = {}
-
             local function scanFolder(folder)
-
                 if not folder then return end
-
                 for _, v in ipairs(folder:GetChildren()) do
-
                     local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v.Name
-
                     if uidAttr then pModels[tostring(uidAttr)] = v end
-
                 end
-
             end
-
             
-
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
-
             scanFolder(r:FindFirstChild("__DEBRIS"))
-
             
-
-            local records = {}
-
-            if s then
-
-                local st, fd = false, nil
-
-                if s.ReadFieldEggs then st, fd = pcall(s.ReadFieldEggs)
-
-                elseif s.SyncFieldEggs then st, fd = pcall(s.SyncFieldEggs) end
-
-                
-
-                if st and type(fd) == "table" then
-
-                    local rawRec = fd.Records or fd
-
-                    if type(rawRec) == "table" then
-
-                        for k, rec in pairs(rawRec) do
-
-                            if type(rec) == "table" then
-
-                                local u = tostring(rec.Uid or k)
-
-                                records[u] = rec
-
-                            end
-
-                        end
-
-                    end
-
-                end
-
+            local hwDimension = r:FindFirstChild("HalloweenDimension")
+            if hwDimension and hwDimension:FindFirstChild("WorldEggs") then
+                scanFolder(hwDimension.WorldEggs)
             end
-
             
-
-            for u, rawModel in pairs(pModels) do
-
-                total = total + 1
-
+            local records = {}
+            if s then
+                local st, fd = false, nil
+                if s.ReadFieldEggs then st, fd = pcall(s.ReadFieldEggs)
+                elseif s.SyncFieldEggs then st, fd = pcall(s.SyncFieldEggs) end
                 
-
-                -- OTIMIZAÇÃO: Se o ovo não estiver na memória, faz as contas pesadas.
-
-                if not cachedEggs[u] then
-
-                    local rec = records[u] or {}
-
-                    local cat = rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rec.AssetCategory or rec.Category or "Egg"
-                    
-                    -- CORREÇÃO: Aplica a tradução (Muda "Rotshroom" para "Toadstool")
-                    if nameTranslation[cat] then
-                        cat = nameTranslation[cat]
+                if st and type(fd) == "table" then
+                    local rawRec = fd.Records or fd
+                    if type(rawRec) == "table" then
+                        for k, rec in pairs(rawRec) do
+                            if type(rec) == "table" then
+                                local u = tostring(rec.Uid or k)
+                                records[u] = rec
+                            end
+                        end
                     end
+                end
+            end
+            
+            for u, rawModel in pairs(pModels) do
+                total = total + 1
+                
+                if not cachedEggs[u] then
+                    local rec = records[u] or {}
+                    
+                    local rawCat = rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rec.AssetCategory or rec.Category
+                    if not rawCat or rawCat == "Egg" or rawCat == "Model" then
+                        rawCat = rawModel.Name 
+                    end
+                    
+                    local cleanCat = string.gsub(rawCat, "_Egg", "")
+                    cleanCat = string.gsub(cleanCat, " Egg", "")
+                    cleanCat = string.gsub(cleanCat, "Model", "")
 
+                    local cat = nameTranslation[cleanCat] or nameTranslation[rawCat] or cleanCat
+                    
                     local area = rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rec.AreaId or "Unknown"
-
                     local rarity = getEggRarity(cat, rawModel, rec)
 
-
-
                     local scale = tonumber(rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))
-
                     if not scale then scale = tonumber(rec.Scale or rec.AssetScale) end
-
                     scale = scale or 1
-
                     
-
                     local peso = tonumber(rawModel:GetAttribute("Weight") or rawModel:GetAttribute("Kg") or rawModel:GetAttribute("ModelWeight"))
-
                     if not peso then peso = tonumber(rec.Weight or rec.Kg or rec.ModelWeight) end
-
                     
-
                     local mAttr = rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation") or rec.Mutations or rec.Mutation
-
                     
-
                     local real = 0
-
                     if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
-
                         pcall(function()
-
                             real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({
-
                                 Category = cat,
-
                                 Mutations = mAttr,
-
                                 Scale = scale
-
                             })) or 0
-
                         end)
-
                     end
-
                     
-
                     if real == 0 then
-
                         local base = tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))
-
                         if not base then base = tonumber(rec.Income or rec.EarningRate or rec.MoneyPerSecond) end
-
                         if (not base or base == 0) and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond) end
-
                         
-
-                        -- NOVO: Busca renda base no HalloweenPets ou novos Assets
+                        if not base or base == 0 then
+                            pcall(function()
+                                if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) end
+                                if (not base or base == 0) and pUtil and pUtil.Assets and pUtil.Assets[cat] then
+                                    local ast = pUtil.Assets[cat]
+                                    base = tonumber(ast.EarningRate or (ast.Egg and ast.Egg.EarningRate))
+                                end
+                                
                                 if not base or base == 0 then
                                     local ast = (hPets and hPets.Specs and hPets.Specs[cat]) or (newAssets and newAssets.Directory and newAssets.Directory[cat])
                                     if ast then
                                         base = tonumber(ast.EarningRate or ast.Income or ast.MoneyPerSecond)
                                     end
                                 end
-
-                        base = base or 0
-
-                        if base == 0 then base = 1 end
-
-                        
-
-                        local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
-
-                        local mutMult = 1
-
-                        if mutModule and mAttr then
-
-                            pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
-
-                        elseif type(mAttr) == "table" then
-
-                            for _, m in pairs(mAttr) do
-
-                                local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
-
-                                mutMult = mutMult * val
-
-                            end
-
-                        elseif mAttr then 
-
-                            mutMult = 1.5 
-
+                            end)
                         end
-
+                        base = base or 0
+                        if base == 0 then base = 1 end
                         
-
+                        local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
+                        local mutMult = 1
+                        if mutModule and mAttr then
+                            pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
+                        elseif type(mAttr) == "table" then
+                            for _, m in pairs(mAttr) do
+                                local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
+                                mutMult = mutMult * val
+                            end
+                        elseif mAttr then 
+                            mutMult = 1.5 
+                        end
+                        
                         real = base * scaleMult * mutMult
-
                         if real < 1 and base > 0 then real = 1 end
-
                     end
-
                     
-
                     real = math.floor(real + 0.5)
-
                     local pesoStr = peso and string.format("%.1f Kg", peso) or string.format("%.1fx", scale)
-
                     local checkSize = peso or scale or 0
-
                     
-
-                    -- Guarda todas as contas na memória!
-
                     cachedEggs[u] = {C=cat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
-
                 end
-
                 
-
-                -- Puxa da memória instantaneamente sem processamento pesado
-
                 local cData = cachedEggs[u]
-
                 if cData.R > b then b = cData.R end
-
                 
-
                 local isValid = (cData.R >= h.I and cData.CS >= h.S)
-
                 local d = {U=u, C=cData.C, A=cData.A, S=cData.S, R=cData.R, P=cData.P, Rar=cData.Rar}
-
                 
-
                 if isValid then
-
                     act = act + 1
-
                     if not X[u] then
-
                         X[u] = true
-
                         Wk(d) 
-
                     end
-
                 end
-
                 
-
                 if rawModel then
-
                     local pModel = rawModel
-
                     if pModel:IsA("Folder") then
-
                         pModel = pModel:FindFirstChildWhichIsA("BasePart") or pModel:FindFirstChildWhichIsA("Model") or pModel
-
                     end
-
                     Dk(u, pModel, d, isValid)
-
                 end
-
             end
-
             
-
             if act > 0 then
-
                 lastValidEggTime = os.clock()
-
             elseif h.AH and (os.clock() - lastValidEggTime >= h.AHT) then
-
                 task.spawn(doServerHop)
-
             end
-
             
-
             if stat then 
-
                 if h.AH and act == 0 then
-
                     local tempoRestante = math.max(0, math.floor(h.AHT - (os.clock() - lastValidEggTime)))
-
                     stat.Text = string.format("Status: Hop em %ds...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", tempoRestante, total, act, formatNumber(b))
-
                 else
-
                     stat.Text = string.format("Status: Scanning...\nOvos no Mapa: %d\nValidos (Alvos): %d | Melhor: $%s/s", total, act, formatNumber(b)) 
-
                 end
-
             end
-
             
-
-            -- Limpa da memória (ESP e Cache) os ovos que desapareceram do mapa
-
             for k, v in pairs(Z) do
-
                 if not pModels[k] or not v.M or not v.M.Parent then
-
                     if v.B then pcall(function() v.B:Destroy() end) end
-
                     Z[k] = nil
-
                 end
-
             end
-
             for k in pairs(cachedEggs) do
-
                 if not pModels[k] then
-
                     cachedEggs[k] = nil
-
                 end
-
             end
-
             
-
         end)
-
     end
-
-end) 
+end)
