@@ -271,13 +271,33 @@ end)
 
 addBtn("Testar Webhook", function()
     if h.W == "" or not req then return end
+    
+    local playerName = o.Name
+    local placeId = game.PlaceId
+    local jobId = game.JobId
+    
+    -- Link utilizando o seu site personalizado de Join
+    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
+
     local m = ""
-    if h.P ~= "" then m = "Teste de Ping! <@"..h.P..">" end
+    if h.P ~= "" then 
+        m = "Teste de Ping do Radar! <@"..h.P..">" 
+    else
+        m = "Teste de Ping do Radar!"
+    end
+    
     local E = {{
         title = "✅ Conexão Estabelecida!",
-        description = "O Webhook do Dice Radar está a funcionar perfeitamente e pronto a detetar ovos.",
-        color = 65352
+        description = "O Webhook do Dice Radar está configurado e pronto para detectar ovos.",
+        url = joinLink, -- Torna o título clicável para o seu site
+        color = 65352,
+        fields = {
+            {name = "👤 Conta Testando", value = "**" .. playerName .. "**", inline = true},
+            {name = "🔗 Servidor Atual", value = "[Clique para Join (Netlify)](" .. joinLink .. ")", inline = true},
+            {name = "🆔 JobId", value = "```\n" .. tostring(jobId) .. "\n```", inline = false}
+        }
     }}
+    
     pcall(function()
         req({Url=h.W, Method="POST", Headers={["Content-Type"]="application/json"}, Body=a:JSONEncode({content=m, embeds=E})})
     end)
