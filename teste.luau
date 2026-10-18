@@ -661,6 +661,9 @@ task.spawn(function()
                     
                     local area = (rawModel and (rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rawModel:GetAttribute("Zone"))) or rec.AreaId or rec.Zone or "Unknown"
 
+                    -- 🚀 VERIFICAÇÃO NA BASE DE DADOS SUPREMA DE HALLOWEEN 🚀
+                    local hwData = HalloweenDB[displayCat] or HalloweenDB[cat] or (rName and HalloweenDB[rName])
+
                     local scale = tonumber((rawModel and (rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))) or rec.Scale or rec.AssetScale)
                     if not scale and rawModel and rawModel:IsA("Model") then
                         pcall(function() scale = rawModel:GetScale() end)
@@ -668,7 +671,13 @@ task.spawn(function()
                             pcall(function()
                                 local extents = rawModel:GetExtentsSize()
                                 local maxAxis = math.max(extents.X, extents.Y, extents.Z)
-                                if maxAxis > 5 then scale = maxAxis / 4.5 end
+                                if hwData then
+                                    -- Exclusivo para Halloween: corrige o tamanho base da mesh (5.25) e lê ovos menores que 1.0x
+                                    if maxAxis > 2 then scale = maxAxis / 5.25 end
+                                else
+                                    -- Intocado para todos os outros ovos normais do jogo
+                                    if maxAxis > 5 then scale = maxAxis / 4.5 end
+                                end
                             end)
                         end
                     end
@@ -678,9 +687,6 @@ task.spawn(function()
                     
                     local real, base = 0, 0
                     local rarity = "Unknown"
-                    
-                    -- 🚀 VERIFICAÇÃO NA BASE DE DADOS SUPREMA DE HALLOWEEN 🚀
-                    local hwData = HalloweenDB[displayCat] or HalloweenDB[cat] or (rName and HalloweenDB[rName])
                     
                     if hwData then
                         base = hwData.Base
