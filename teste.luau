@@ -534,6 +534,7 @@ task.spawn(function()
         ["Frankenstein Kong Egg"] = "Abomination Kong",
         ["Quilted Imp Egg"] = "Patchwork Imp",
         ["SpiritKnight"] = "Spirit Knight",
+        ["HalloweenEgg"] = "Hooded Gerbil",
     }
 
     while task.wait(1.5) do
