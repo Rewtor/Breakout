@@ -263,7 +263,7 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook", function()
+addBtn("Testar Webhook v2", function()
     if h.W == "" or not req then return end
     local m = ""
     if h.P ~= "" then m = "Teste de Ping! <@"..h.P..">" end
