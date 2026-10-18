@@ -1445,513 +1445,201 @@ end
 
 
 -- ========================================================
-
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Turbinado V4 - Correção Halloween Agressiva)
-
+-- 7. MOTOR DE VARREDURA PRINCIPAL (PATCH HÍBRIDO V7)
 -- ========================================================
-
 task.spawn(function()
-
     while task.wait(1.5) do
-
         pcall(function()
-
-            local act = 0
-
-            local total = 0
-
+            local act, total = 0, 0
+            if os.clock() - lastReset >= 10 then b = 0; lastReset = os.clock() end
             
-
-            if os.clock() - lastReset >= 10 then
-
-                b = 0
-
-                lastReset = os.clock()
-
-            end
-
+            local allUids, pModels, records = {}, {}, {}
             
-
-            local allUids = {}
-
-            local pModels = {}
-
-            
-
             local function scanFolder(folder)
-
                 if not folder then return end
-
                 for _, v in ipairs(folder:GetChildren()) do
-
-                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v:GetAttribute("HalloweenEggUid") or v:GetAttribute("Id") or v:GetAttribute("ID") or v:GetAttribute("EggId")
-
-                    if not uidAttr and v.Name ~= "Model" and v.Name ~= "Part" then uidAttr = v.Name end
-
-                    
-
+                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("HalloweenEggUid") or v:GetAttribute("Id")
+                    if not uidAttr and v.Name ~= "Model" and v.Name ~= "Part" and string.len(v.Name) > 5 then 
+                        uidAttr = v.Name 
+                    end
                     if uidAttr then 
-
                         local uidStr = tostring(uidAttr)
-
-                        pModels[uidStr] = v 
-
-                        allUids[uidStr] = true
-
+                        pModels[uidStr] = v
+                        allUids[uidStr] = true 
                     end
-
                 end
-
             end
-
             
-
-            -- 1. Busca as pastas normais
-
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
-
             scanFolder(r:FindFirstChild("__DEBRIS"))
-
             
-
-            -- 2. Busca Dinâmica de Pastas Normais
-
             for _, folder in ipairs(r:GetChildren()) do
-
-                if folder:IsA("Folder") and string.find(string.lower(folder.Name), "eggslots") and folder.Name ~= "AreaEggSlotsClient" then
-
-                    scanFolder(folder)
-
-                end
-
+                if folder:IsA("Folder") and string.find(string.lower(folder.Name), "eggslots") then scanFolder(folder) end
             end
-
-
-
-            -- 3. BUSCA ESPECÍFICA DA DIMENSÃO DE HALLOWEEN
-
+            
             local hwDimension = r:FindFirstChild("HalloweenDimension")
-
-            if hwDimension then
-
-                local worldEggs = hwDimension:FindFirstChild("WorldEggs")
-
-                if worldEggs then
-
-                    scanFolder(worldEggs)
-
-                end
-
-            end
-
+            if hwDimension and hwDimension:FindFirstChild("WorldEggs") then scanFolder(hwDimension.WorldEggs) end
             
-
-            -- 4. Leitura do Banco de Dados
-
-            local records = {}
-
             if s then
-
-                local st, fd = false, nil
-
-                if s.ReadFieldEggs then st, fd = pcall(s.ReadFieldEggs)
-
-                elseif s.SyncFieldEggs then st, fd = pcall(s.SyncFieldEggs) end
-
-                
-
+                local st, fd = pcall(s.ReadFieldEggs)
+                if not st then st, fd = pcall(s.SyncFieldEggs) end
                 if st and type(fd) == "table" then
-
-                    local rawRec = fd.Records or fd
-
-                    if type(rawRec) == "table" then
-
-                        for k, rec in pairs(rawRec) do
-
-                            if type(rec) == "table" then
-
-                                local u = tostring(rec.Uid or rec.HalloweenEggUid or rec.Id or rec.ID or k)
-
-                                records[u] = rec
-
-                                allUids[u] = true 
-
-                            end
-
+                    for k, rec in pairs(fd.Records or fd) do
+                        if type(rec) == "table" then
+                            local u = tostring(rec.Uid or rec.HalloweenEggUid or rec.Id or k)
+                            records[u] = rec; allUids[u] = true 
                         end
-
                     end
-
                 end
-
             end
-
             
-
-            -- 5. Processamento e Cálculo
-
             for u in pairs(allUids) do
-
                 local rawModel = pModels[u]
-
                 local rec = records[u] or {}
-
-                
-
                 total = total + 1
-
                 
-
                 if not cachedEggs[u] then
-
-                    -- Categoria Base (A genérica que a matemática do jogo espera ler)
-
-                    local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.AssetCategory or rec.Category or rec.ItemName or "Egg"
-
+                    local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.Category or rec.AssetCategory or rec.ItemName or "Egg"
+                    local displayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or cat
                     
-
-                    -- Nome Visual (O nome real, como Crowshade, para o nosso radar e discord)
-
-                    local displayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("SourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or cat
-
-                    if displayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" then displayCat = rawModel.Name end
-
+                    -- FILTRO DE NOME: Impede GUIDs gigantes e caminhos estranhos de sujarem o ecrã
+                    if displayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" and string.len(rawModel.Name) < 30 and not string.find(rawModel.Name, "_") then 
+                        displayCat = rawModel.Name 
+                    end
                     
-
-                    local area = (rawModel and (rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rawModel:GetAttribute("Zone"))) or rec.AreaId or rec.Zone or "Unknown"
-
-                    local rarity = getEggRarity(displayCat, rawModel, rec)
-
-
-
-                    local scale = rawModel and tonumber(rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))
-
-                    if not scale then scale = tonumber(rec.Scale or rec.AssetScale) end
-
-                    scale = scale or 1
-
+                    local area = (rawModel and rawModel:GetAttribute("Zone")) or rec.Zone or "Unknown"
                     
-
-                    local peso = rawModel and tonumber(rawModel:GetAttribute("Weight") or rawModel:GetAttribute("Kg") or rawModel:GetAttribute("ModelWeight"))
-
-                    if not peso then peso = tonumber(rec.Weight or rec.Kg or rec.ModelWeight) end
-
+                    -- ==========================================================
+                    -- 🔴 SISTEMA DE MEDIÇÃO FÍSICA DE ESCALA
+                    -- ==========================================================
+                    local scale = tonumber((rawModel and (rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))) or rec.Scale or rec.AssetScale)
                     
-
-                    local mAttr = rawModel and (rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation")) or rec.Mutations or rec.Mutation
-
+                    if not scale and rawModel and rawModel:IsA("Model") then
+                        pcall(function() scale = rawModel:GetScale() end)
+                        
+                        if not scale or scale == 1 then
+                            pcall(function()
+                                local extents = rawModel:GetExtentsSize()
+                                local maxAxis = math.max(extents.X, extents.Y, extents.Z)
+                                if maxAxis > 5 then
+                                    scale = maxAxis / 4.5
+                                end
+                            end)
+                        end
+                    end
+                    scale = tonumber(scale) or 1
+                    -- ==========================================================
                     
-
-                    local real = 0
-
+                    local basePeso = tonumber((rawModel and (rawModel:GetAttribute("Weight") or rawModel:GetAttribute("ModelWeight"))) or rec.Weight or rec.ModelWeight)
+                    local mAttr = (rawModel and (rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation"))) or rec.Mutations or rec.Mutation
+                    
+                    local real, base = 0, 0
+                    
+                    -- 1. CÁLCULO NATIVO RECUPERADO (Resolve os ovos normais)
                     if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
-
-                        -- Tenta a matemática padrão enganando o sistema com vários nomes
-
-                        pcall(function()
-
-                            real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({
-
-                                Category = cat,
-
-                                ItemName = displayCat,
-
-                                Name = displayCat,
-
-                                Mutations = mAttr,
-
-                                Scale = scale
-
-                            })) or 0
-
-                        end)
-
+                        pcall(function() real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
                         if real == 0 and displayCat ~= cat then
-
-                            pcall(function()
-
-                                real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({
-
-                                    Category = displayCat,
-
-                                    ItemName = cat,
-
-                                    Name = cat,
-
-                                    Mutations = mAttr,
-
-                                    Scale = scale
-
-                                })) or 0
-
-                            end)
-
+                            pcall(function() real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = displayCat, Mutations = mAttr, Scale = scale})) or 0 end)
                         end
-
                     end
-
                     
-
+                    -- 2. CÁLCULO MANUAL (Para eventos ou quando o nativo falha)
                     if real == 0 then
-
-                        -- Procura agressiva pelas variáveis de base escondidas nos eventos
-
-                        local base = rawModel and tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate") or rawModel:GetAttribute("BaseIncome") or rawModel:GetAttribute("MoneyPerSecond") or rawModel:GetAttribute("EventIncome") or rawModel:GetAttribute("Value") or rawModel:GetAttribute("Price"))
-
-                        if not base then base = tonumber(rec.Income or rec.EarningRate or rec.MoneyPerSecond or rec.BaseIncome or rec.Value or rec.Price) end
-
-                        if (not base or base == 0) and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income or rec.ItemData.EarningRate or rec.ItemData.Value or rec.ItemData.Price) end
-
+                        base = tonumber((rawModel and (rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))) or rec.Income or rec.EarningRate or rec.MoneyPerSecond) or 0
+                        if base == 0 and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income) or 0 end
                         
-
-                        -- VASCULHA O 3D: Procura variáveis de dinheiro fisicamente dentro do ovo
-
-                        if (not base or base == 0) and rawModel then
-
-                            pcall(function()
-
-                                for _, child in ipairs(rawModel:GetDescendants()) do
-
-                                    if child:IsA("NumberValue") or child:IsA("IntValue") then
-
-                                        local cName = string.lower(child.Name)
-
-                                        if cName == "income" or cName == "value" or cName == "price" or cName == "earningrate" or cName == "money" then
-
-                                            base = tonumber(child.Value)
-
-                                            if base and base > 0 then break end
-
-                                        end
-
-                                    end
-
-                                end
-
-                            end)
-
+                        if base == 0 then
+                            pcall(function() if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) or 0 end end)
                         end
-
                         
-
-                        -- VASCULHA O BANCO DE DADOS: Invade o módulo de Assets do jogo para puxar tabelas secretas de Halloween
-
-                        if not base or base == 0 then
-
-                            pcall(function()
-
-                                local tryNames = {displayCat, cat, rawModel and rawModel.Name}
-
-                                for _, n in ipairs(tryNames) do
-
-                                    if not n or (base and base > 0) then continue end
-
-                                    
-
-                                    for key1, val1 in pairs(pUtil.Assets or {}) do
-
-                                        if type(val1) == "table" then
-
-                                            -- Match de 1º Nível
-
-                                            if tostring(key1) == n or val1.Name == n or val1.DisplayName == n then
-
-                                                base = tonumber(val1.EarningRate or (val1.Egg and val1.Egg.EarningRate) or val1.MoneyPerSecond or val1.Income or val1.Value or val1.Price) or 0
-
-                                                if base > 0 then break end
-
-                                            end
-
-                                            -- Match de 2º Nível (Subpastas como pUtil.Assets.HalloweenEggs["Crowshade"])
-
-                                            for key2, val2 in pairs(val1) do
-
-                                                if type(val2) == "table" then
-
-                                                    if tostring(key2) == n or val2.Name == n or val2.DisplayName == n then
-
-                                                        base = tonumber(val2.EarningRate or (val2.Egg and val2.Egg.EarningRate) or val2.MoneyPerSecond or val2.Income or val2.Value or val2.Price) or 0
-
-                                                        if base > 0 then break end
-
-                                                    end
-
-                                                end
-
-                                            end
-
-                                            if base and base > 0 then break end
-
-                                        end
-
-                                    end
-
+                        if base == 0 then
+                            local tryNames = {displayCat, cat, rawModel and rawModel.Name}
+                            for _, n in ipairs(tryNames) do
+                                if not n or base > 0 then continue end
+                                
+                                -- Módulo Clássico (Ovos Normais)
+                                if pUtil and pUtil.Assets and pUtil.Assets[n] then
+                                    base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
                                 end
-
-                            end)
-
-                        end
-
-                        
-
-                        base = base or 0
-
-                        if base == 0 then base = 1 end
-
-                        
-
-                        local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
-
-                        local mutMult = 1
-
-                        if mutModule and mAttr then
-
-                            pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
-
-                        elseif type(mAttr) == "table" then
-
-                            for _, m in pairs(mAttr) do
-
-                                local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
-
-                                mutMult = mutMult * val
-
+                                -- Módulos de Halloween (Ovos de Evento)
+                                if base == 0 and hwPets and hwPets.Specs and hwPets.Specs[n] then
+                                    base = tonumber(hwPets.Specs[n].EarningRate) or 0
+                                    if not basePeso then basePeso = tonumber(hwPets.Specs[n].Weight or hwPets.Specs[n].ModelWeight) end
+                                end
+                                if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
+                                    base = tonumber(assetsMod.Directory[n].EarningRate) or 0
+                                    if not basePeso then basePeso = tonumber(assetsMod.Directory[n].ModelWeight) end
+                                end
+                                if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
+                                    base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
+                                    if not basePeso then basePeso = tonumber(pUtil.Assets.Directory[n].ModelWeight) end
+                                end
                             end
-
-                        elseif mAttr then 
-
-                            mutMult = 1.5 
-
                         end
-
                         
-
-                        real = base * scaleMult * mutMult
-
-                        if real < 1 and base > 0 then real = 1 end
-
+                        base = (base == 0) and 1 or base
+                        
+                        -- Matemática de Escala e Mutações recuperada
+                        local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
+                        local mutMult = 1
+                        if mutModule and mAttr then
+                            pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
+                        elseif type(mAttr) == "table" then
+                            for _, m in pairs(mAttr) do
+                                local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
+                                mutMult = mutMult * val
+                            end
+                        elseif mAttr then 
+                            mutMult = 1.5 
+                        end
+                        
+                        real = math.floor((base * scaleMult * mutMult) + 0.5)
                     end
-
                     
-
-                    real = math.floor(real + 0.5)
-
-                    local pesoStr = peso and string.format("%.1f Kg", peso) or string.format("%.1fx", scale)
-
-                    local checkSize = peso or scale or 0
-
+                    local pesoFinal = basePeso and (basePeso * scale) or nil
+                    local pesoStr = pesoFinal and string.format("%.1f Kg", pesoFinal) or string.format("%.1fx", scale)
+                    local rarity = (hwPets and hwPets.Specs and hwPets.Specs[displayCat]) and hwPets.Specs[displayCat].Rarity or "Unknown"
                     
-
-                    -- Guarda todas as contas usando o nome real do ovo (displayCat) para o Discord!
-
-                    cachedEggs[u] = {C=displayCat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
-
+                    cachedEggs[u] = {C=displayCat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=(pesoFinal or scale)}
                 end
-
                 
-
                 local cData = cachedEggs[u]
-
                 if cData.R > b then b = cData.R end
-
                 
-
                 local isValid = (cData.R >= h.I and cData.CS >= h.S)
-
                 local d = {U=u, C=cData.C, A=cData.A, S=cData.S, R=cData.R, P=cData.P, Rar=cData.Rar}
-
                 
-
                 if isValid then
-
                     act = act + 1
-
-                    if not X[u] then
-
-                        X[u] = true
-
-                        Wk(d) 
-
-                    end
-
+                    if not X[u] then X[u] = true Wk(d) end
                 end
-
                 
-
-                if rawModel then
-
-                    local pModel = rawModel
-
-                    if pModel:IsA("Folder") then
-
-                        pModel = pModel:FindFirstChildWhichIsA("BasePart") or pModel:FindFirstChildWhichIsA("Model") or pModel
-
-                    end
-
-                    Dk(u, pModel, d, isValid)
-
-                end
-
+                if rawModel then Dk(u, rawModel, d, isValid) end
             end
-
             
-
             if act > 0 then
-
                 lastValidEggTime = os.clock()
-
             elseif h.AH and (os.clock() - lastValidEggTime >= h.AHT) then
-
                 task.spawn(doServerHop)
-
             end
-
             
-
             if stat then 
-
                 if h.AH and act == 0 then
-
-                    local tempoRestante = math.max(0, math.floor(h.AHT - (os.clock() - lastValidEggTime)))
-
-                    stat.Text = string.format("Status: Hop em %ds...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", tempoRestante, total, act, formatNumber(b))
-
+                    stat.Text = string.format("Status: Hop em %ds...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", math.max(0, math.floor(h.AHT - (os.clock() - lastValidEggTime))), total, act, formatNumber(b))
                 else
-
-                    stat.Text = string.format("Status: Scanning...\nOvos no Mapa: %d\nValidos (Alvos): %d | Melhor: $%s/s", total, act, formatNumber(b)) 
-
+                    stat.Text = string.format("Status: Scanning...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", total, act, formatNumber(b))
                 end
-
             end
-
             
-
             for k, v in pairs(Z) do
-
                 if not allUids[k] or not v.M or not v.M.Parent then
-
-                    if v.B then pcall(function() v.B:Destroy() end) end
-
-                    Z[k] = nil
-
+                    if v.B then pcall(function() v.B:Destroy() end) end Z[k] = nil
                 end
-
             end
-
             for k in pairs(cachedEggs) do
-
-                if not allUids[k] then
-
-                    cachedEggs[k] = nil
-
-                end
-
+                if not allUids[k] then cachedEggs[k] = nil end
             end
-
             
-
         end)
-
     end
-
 end)
