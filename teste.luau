@@ -385,9 +385,22 @@ if not hPets then pcall(function() hPets = require(j.Shared.Modules.HalloweenPet
 local newAssets = nil pcall(function() newAssets = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Assets", 5)) end)
 if not newAssets then pcall(function() newAssets = require(j.Shared.Modules.Assets) end) end
 
-local nameTranslation = {}
+-- O JEITO CERTO: Dicionário Híbrido (Lista manual para corrigir erros dos Devs + Leitura Dinâmica)
+local nameTranslation = {
+    ["Rotshroom"] = "Toadstool",
+    ["Rotshroom Egg"] = "Toadstool",
+    ["Dread Wolf"] = "Werewolf",
+    ["Halloween Royal Mimic Egg"] = "Mimic Chest",
+    ["Royal Mimic Egg"] = "Mimic Chest",
+    ["Royal Mimic"] = "Mimic Chest",
+    ["Frankenstein Kong Egg"] = "Abomination Kong",
+    ["Quilted Imp Egg"] = "Patchwork Imp",
+    ["SpiritKnight"] = "Spirit Knight"
+}
+
 pcall(function()
     local function mapData(realName, data)
+        if type(data) ~= "table" then return end
         if data.Source then nameTranslation[data.Source] = realName end
         if data.EggSource then nameTranslation[data.EggSource] = realName end
         if data.EggModel then nameTranslation[data.EggModel] = realName end
@@ -570,7 +583,16 @@ task.spawn(function()
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
             scanFolder(r:FindFirstChild("__DEBRIS"))
             
+           -- Scan varrendo a Dimensão de Halloween inteira (todas as subpastas simultaneamente)
             local hwDimension = r:FindFirstChild("HalloweenDimension")
+            if hwDimension then
+                -- Em vez de procurar só na "WorldEggs", varre qualquer pasta que estiver lá dentro
+                for _, child in ipairs(hwDimension:GetChildren()) do
+                    if child:IsA("Folder") or child:IsA("Model") then
+                        scanFolder(child)
+                    end
+                end
+            end
             if hwDimension and hwDimension:FindFirstChild("WorldEggs") then
                 scanFolder(hwDimension.WorldEggs)
             end
