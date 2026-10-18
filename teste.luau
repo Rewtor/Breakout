@@ -269,15 +269,45 @@ btnPC.MouseButton1Click:Connect(function()
     btnPC.Text = "Buscar: " .. tostring(h.PC) .. " Jogador(es)"
 end)
 
-addBtn("Testar Webhook (V2)", function()
+-- NOVO NOME DE BOTÃO E LISTA DE OVOS
+addBtn("Testar Webhook (V4)", function()
     if h.W == "" or not req then return end
     
     local playerName = o.Name
     local placeId = game.PlaceId
     local jobId = game.JobId
-    
-    -- Link utilizando o seu site personalizado de Join
     local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
+
+    -- Mini-formatador local para garantir que funciona dentro do botão
+    local function fNum(n)
+        if n >= 1e12 then return string.format("%.2fT", n/1e12) end
+        if n >= 1e9 then return string.format("%.2fB", n/1e9) end
+        if n >= 1e6 then return string.format("%.2fM", n/1e6) end
+        if n >= 1e3 then return string.format("%.1fk", n/1e3) end
+        return tostring(math.floor(n))
+    end
+
+    -- Puxa todos os ovos da memória e organiza do mais caro pro mais barato
+    local eggList = {}
+    for u, d in pairs(cachedEggs) do
+        table.insert(eggList, d)
+    end
+    table.sort(eggList, function(a, b) return (a.R or 0) > (b.R or 0) end)
+    
+    -- Monta a lista em texto (Limite de 15 para o Discord não bloquear a mensagem)
+    local eggString = ""
+    local maxList = 15
+    for i, d in ipairs(eggList) do
+        if i > maxList then 
+            eggString = eggString .. string.format("\n*... e mais %d ovos escondidos*", #eggList - maxList)
+            break 
+        end
+        eggString = eggString .. string.format("• **%s** (%s) | $%s/s\n", d.C, d.P, fNum(d.R))
+    end
+    
+    if #eggList == 0 then
+        eggString = "Nenhum ovo carregado no mapa no momento."
+    end
 
     local m = ""
     if h.P ~= "" then 
@@ -288,8 +318,8 @@ addBtn("Testar Webhook (V2)", function()
     
     local E = {{
         title = "✅ Conexão Estabelecida!",
-        description = "O Webhook do Dice Radar está configurado e pronto para detectar ovos.",
-        url = joinLink, -- Torna o título clicável para o seu site
+        description = "O Webhook do Dice Radar está configurado.\n\n**📋 Top Ovos no Mapa Atual:**\n" .. eggString,
+        url = joinLink,
         color = 65352,
         fields = {
             {name = "👤 Conta Testando", value = "**" .. playerName .. "**", inline = true},
