@@ -1,5 +1,5 @@
 -- ========================================================
--- 1. IMPORTAÇÃO DOS SERVIÇOS DO ROBLOX
+-- RADAR V8 (HALLOWEEN + CLASSIC FIX + CLEAN NAMES)
 -- ========================================================
 local e = game:GetService("Players")
 local r = game:GetService("Workspace")
@@ -14,7 +14,7 @@ local o = e.LocalPlayer
 local req = (syn and syn.request) or http_request or request or HttpPost
 
 -- ========================================================
--- 2. CONFIGURAÇÕES PADRÃO E GESTÃO DE FICHEIRO JSON
+-- CONFIGURAÇÕES PADRÃO E GESTÃO DE FICHEIRO JSON
 -- ========================================================
 local h = {W="", P="", I=0, S=0, E=true, WH=false, AH=false, AHT=60, PC=1}
 local cfgFile = "DiceRadar_Config.json"
@@ -22,11 +22,7 @@ local cfgFile = "DiceRadar_Config.json"
 if isfile and readfile and isfile(cfgFile) then
     pcall(function()
         local saved = a:JSONDecode(readfile(cfgFile))
-        if type(saved) == "table" then
-            for k, v in pairs(saved) do
-                h[k] = v
-            end
-        end
+        if type(saved) == "table" then for k, v in pairs(saved) do h[k] = v end end
     end)
 end
 
@@ -35,16 +31,12 @@ h.S = tonumber(h.S) or 0
 h.AHT = tonumber(h.AHT) or 60
 h.PC = tonumber(h.PC) or 1
 
-local X = {} 
-local Z = {} 
-local cachedEggs = {} -- OTIMIZAÇÃO MAXIMA: Memória para não fritar o CPU do dispositivo
-local b = 0  
-local isHopping = false 
-local lastReset = os.clock()
-local lastValidEggTime = os.clock() 
+local X, Z, cachedEggs = {}, {}, {}
+local b, isHopping = 0, false
+local lastReset, lastValidEggTime = os.clock(), os.clock()
 
 -- ========================================================
--- 3. CONSTRUÇÃO DA INTERFACE GRÁFICA (GUI) - MINIMIZÁVEL
+-- CONSTRUÇÃO DA INTERFACE GRÁFICA (GUI)
 -- ========================================================
 if c:FindFirstChild("DiceRadarGUI") then c.DiceRadarGUI:Destroy() end
 
@@ -193,16 +185,10 @@ addBox("Auto Hop Timer (s)", h.AHT, function(v) h.AHT = tonumber(v) or 60 end)
 
 addTog("Enable ESP", h.E, function(v) 
     h.E = v 
-    for k, esp in pairs(Z) do
-        if esp.B then pcall(function() esp.B.Enabled = v end) end
-    end
+    for k, esp in pairs(Z) do if esp.B then pcall(function() esp.B.Enabled = v end) end end
 end)
-
 addTog("Enable Webhooks", h.WH, function(v) h.WH = v end)
-addTog("Auto Server Hop", h.AH, function(v) 
-    h.AH = v 
-    lastValidEggTime = os.clock() 
-end)
+addTog("Auto Server Hop", h.AH, function(v) h.AH = v; lastValidEggTime = os.clock() end)
 
 local fPC = Instance.new("Frame", cont)
 fPC.Size = UDim2.new(1, 0, 0, 30)
@@ -229,18 +215,12 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook (V4)", function()
+addBtn("Testar Webhook", function()
     if h.W == "" or not req then return end
-    
-    local playerName = o.Name
-    local placeId = game.PlaceId
-    local jobId = game.JobId
-    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
+    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(game.PlaceId) .. "&jobId=" .. tostring(game.JobId)
 
     local eggList = {}
-    for u, d in pairs(cachedEggs) do
-        table.insert(eggList, d)
-    end
+    for u, d in pairs(cachedEggs) do table.insert(eggList, d) end
     table.sort(eggList, function(a, b) return (a.R or 0) > (b.R or 0) end)
     
     local eggString = ""
@@ -252,71 +232,45 @@ addBtn("Testar Webhook (V4)", function()
         end
         eggString = eggString .. string.format("• **%s** (%s) | $%s/s\n", d.C, d.P, formatNumber(d.R))
     end
-    
-    if #eggList == 0 then
-        eggString = "Nenhum ovo carregado no mapa no momento."
-    end
+    if #eggList == 0 then eggString = "Nenhum ovo carregado no mapa no momento." end
 
-    local m = ""
-    if h.P ~= "" then 
-        m = "Teste de Ping do Radar! <@"..h.P..">" 
-    else
-        m = "Teste de Ping do Radar!"
-    end
-    
+    local m = "Teste de Ping do Radar!" .. (h.P ~= "" and " <@"..h.P..">" or "")
     local E = {{
         title = "✅ Conexão Estabelecida!",
         description = "O Webhook do Dice Radar está configurado.\n\n**📋 Top Ovos no Mapa Atual:**\n" .. eggString,
-        url = joinLink,
-        color = 65352,
+        url = joinLink, color = 65352,
         fields = {
-            {name = "👤 Conta Testando", value = "**" .. playerName .. "**", inline = true},
+            {name = "👤 Conta Testando", value = "**" .. o.Name .. "**", inline = true},
             {name = "🔗 Servidor Atual", value = "[Clique para Join (Netlify)](" .. joinLink .. ")", inline = true},
         }
     }}
-    
-    pcall(function()
-        req({Url=h.W, Method="POST", Headers={["Content-Type"]="application/json"}, Body=a:JSONEncode({content=m, embeds=E})})
-    end)
+    pcall(function() req({Url=h.W, Method="POST", Headers={["Content-Type"]="application/json"}, Body=a:JSONEncode({content=m, embeds=E})}) end)
 end)
 
 addBtn("Salvar Configurações", function()
-    if writefile then
-        pcall(function()
-            writefile(cfgFile, a:JSONEncode(h))
-        end)
-    end
+    if writefile then pcall(function() writefile(cfgFile, a:JSONEncode(h)) end) end
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Busca Rápida com Paragem Inteligente)
+-- SISTEMA DE SERVER HOP
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
     isHopping = true
-    
     pcall(function()
         if stat then stat.Text = "Status: Procurando servidores (Modo Rápido)..." end
-        
         local baseUrl = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
         local cursor = ""
         local availableServers = {}
         local pagesLoaded = 0
-        local maxPages = 30
         
-        while pagesLoaded < maxPages do
-            local currentUrl = baseUrl
-            if cursor ~= "" then
-                currentUrl = currentUrl .. "&cursor=" .. cursor
-            end
-            currentUrl = currentUrl .. "&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
-            
+        while pagesLoaded < 30 do
+            local currentUrl = baseUrl .. (cursor ~= "" and "&cursor=" .. cursor or "") .. "&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
             local success, result = pcall(function() return game:HttpGet(currentUrl) end)
             
             if not success or not result then
                 if stat then stat.Text = "Status: Roblox limitou a busca. Pausa de 1s..." end
-                task.wait(1)
-                continue
+                task.wait(1) continue
             end
             
             local data = a:JSONDecode(result)
@@ -326,33 +280,15 @@ local function doServerHop()
                         table.insert(availableServers, v.id)
                     end
                 end
-                
-                if #availableServers >= 8 then
-                    break
-                end
-                
-                if data.nextPageCursor then
-                    cursor = data.nextPageCursor
-                    pagesLoaded = pagesLoaded + 1
-                else
-                    break
-                end
-            else
-                break
-            end
+                if #availableServers >= 8 then break end
+                if data.nextPageCursor then cursor = data.nextPageCursor; pagesLoaded = pagesLoaded + 1 else break end
+            else break end
         end
         
         if #availableServers > 0 then
             math.randomseed(os.clock())
-            local randomServerId = availableServers[math.random(1, #availableServers)]
-            
-            if stat then stat.Text = "Status: Teleportando..." end
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
-            
-            task.delay(8, function()
-                isHopping = false
-                lastValidEggTime = os.clock()
-            end)
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, availableServers[math.random(1, #availableServers)], o)
+            task.delay(8, function() isHopping = false; lastValidEggTime = os.clock() end)
             return
         end
         
@@ -360,85 +296,56 @@ local function doServerHop()
         if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
     end)
 end
-
 addBtn("Server Hop (Servidor Vazio)", doServerHop)
 
 -- ========================================================
--- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
+-- MÓDULOS INTERNOS DO JOGO (TODOS RESTAURADOS)
 -- ========================================================
 local s = nil pcall(function() s = require(j:WaitForChild("Client", 5):WaitForChild("EggState", 5)) end)
 local pUtil = nil pcall(function() pUtil = require(j:WaitForChild("Shared", 5):WaitForChild("Util", 5):WaitForChild("AssetItems", 5)) end)
-
--- Módulos Descobertos via Lógica Reversa
+local AssetEarnings = nil pcall(function() AssetEarnings = require(j:WaitForChild("Shared", 5):WaitForChild("Util", 5):WaitForChild("AssetEarnings", 5)) end)
+local mutModule = nil pcall(function() mutModule = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Mutations", 5)) end)
 local hwPets = nil pcall(function() hwPets = require(j:FindFirstChild("HalloweenPets", true)) end)
 local assetsMod = nil pcall(function() assetsMod = require(j:FindFirstChild("Assets", true)) end)
 
 -- ========================================================
--- 6. SISTEMA DE DISCORD WEBHOOK E ESP (Notificações)
+-- DISCORD WEBHOOK E ESP
 -- ========================================================
 local function Wk(d)
     if not h.WH or h.W == "" or not req then return end
-
-    local playerName = o.Name
-    local placeId = game.PlaceId
-    local jobId = game.JobId
-    
-    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
-    
-    local m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "**" .. (h.P ~= "" and " <@"..h.P..">" or " pega la")
-    
+    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(game.PlaceId) .. "&jobId=" .. tostring(game.JobId)
+    local m = "**" .. o.Name .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "**" .. (h.P ~= "" and " <@"..h.P..">" or " pega la")
     local E = {{
-        title = "🥚 Ovo Gigante DETECTADO!",
-        url = joinLink,
-        color = 65352,
+        title = "🥚 Ovo Gigante DETECTADO!", url = joinLink, color = 65352,
         fields = {
-            {name = "Categoria", value = d.C, inline = true},
-            {name = "Area", value = d.A, inline = true},
-            {name = "Raridade", value = d.Rar, inline = true},
-            {name = "Tamanho", value = d.P, inline = true},
+            {name = "Categoria", value = d.C, inline = true}, {name = "Area", value = d.A, inline = true},
+            {name = "Raridade", value = d.Rar, inline = true}, {name = "Tamanho", value = d.P, inline = true},
             {name = "Dinheiro/S", value = "$" .. formatNumber(d.R) .. "/s", inline = true},
-            {name = "🔗 Link de Join Automático", value = "[Abrir Servidor](" .. joinLink .. ")", inline = false},
+            {name = "🔗 Link de Join", value = "[Abrir Servidor](" .. joinLink .. ")", inline = false},
         }
     }}
-    
-    pcall(function()
-        req({Url = h.W, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = a:JSONEncode({content = m, embeds = E})})
-    end)
+    pcall(function() req({Url = h.W, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = a:JSONEncode({content = m, embeds = E})}) end)
 end
 
 local function Dk(u, m, d, isValid)
     if not m then return end
-    local isVisible = h.E and isValid
-
     if Z[u] then 
-        if Z[u].B and Z[u].B:FindFirstChild("TextLabel") then
-            Z[u].B.TextLabel.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P)
-        end
-        if Z[u].B then pcall(function() Z[u].B.Enabled = isVisible end) end
+        if Z[u].B and Z[u].B:FindFirstChild("TextLabel") then Z[u].B.TextLabel.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P) end
+        if Z[u].B then pcall(function() Z[u].B.Enabled = h.E and isValid end) end
         return 
     end
-    
-    if not isVisible then return end
-    
+    if not (h.E and isValid) then return end
     local bb = Instance.new("BillboardGui", m)
-    bb.Size = UDim2.new(0, 150, 0, 50)
-    bb.StudsOffset = Vector3.new(0, 4, 0)
-    bb.AlwaysOnTop = true
-    
+    bb.Size = UDim2.new(0, 150, 0, 50); bb.StudsOffset = Vector3.new(0, 4, 0); bb.AlwaysOnTop = true
     local tl = Instance.new("TextLabel", bb)
-    tl.Size = UDim2.new(1, 0, 1, 0)
-    tl.BackgroundTransparency = 1
-    tl.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P)
-    tl.TextColor3 = Color3.fromRGB(0, 195, 255)
-    tl.TextStrokeTransparency = 0.2
-    tl.Font = Enum.Font.GothamBold
-    tl.TextSize = 11
-    
+    tl.Size = UDim2.new(1, 0, 1, 0); tl.BackgroundTransparency = 1
+    tl.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P); tl.TextColor3 = Color3.fromRGB(0, 195, 255)
+    tl.TextStrokeTransparency = 0.2; tl.Font = Enum.Font.GothamBold; tl.TextSize = 11
     Z[u] = {B = bb, M = m}
 end
 
 -- ========================================================
--- 7. MOTOR DE VARREDURA PRINCIPAL (PATCH HÍBRIDO V7)
+-- MOTOR DE VARREDURA PRINCIPAL (V8 DEFINITIVA)
 -- ========================================================
 task.spawn(function()
     while task.wait(1.5) do
@@ -452,24 +359,19 @@ task.spawn(function()
                 if not folder then return end
                 for _, v in ipairs(folder:GetChildren()) do
                     local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("HalloweenEggUid") or v:GetAttribute("Id")
-                    if not uidAttr and v.Name ~= "Model" and v.Name ~= "Part" and string.len(v.Name) > 5 then 
-                        uidAttr = v.Name 
-                    end
+                    if not uidAttr and v.Name ~= "Model" and v.Name ~= "Part" then uidAttr = v.Name end
                     if uidAttr then 
                         local uidStr = tostring(uidAttr)
-                        pModels[uidStr] = v
-                        allUids[uidStr] = true 
+                        pModels[uidStr] = v; allUids[uidStr] = true 
                     end
                 end
             end
             
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
             scanFolder(r:FindFirstChild("__DEBRIS"))
-            
             for _, folder in ipairs(r:GetChildren()) do
                 if folder:IsA("Folder") and string.find(string.lower(folder.Name), "eggslots") then scanFolder(folder) end
             end
-            
             local hwDimension = r:FindFirstChild("HalloweenDimension")
             if hwDimension and hwDimension:FindFirstChild("WorldEggs") then scanFolder(hwDimension.WorldEggs) end
             
@@ -495,98 +397,88 @@ task.spawn(function()
                     local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.Category or rec.AssetCategory or rec.ItemName or "Egg"
                     local displayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or cat
                     
-                    -- FILTRO DE NOME: Impede GUIDs gigantes e caminhos estranhos de sujarem o ecrã
-                    if displayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" and string.len(rawModel.Name) < 30 and not string.find(rawModel.Name, "_") then 
-                        displayCat = rawModel.Name 
+                    -- FILTRO DE NOME LIMPO: Bloqueia hashes e links longos de aparecerem na tela
+                    if displayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" then 
+                        if string.len(rawModel.Name) < 30 and not string.find(rawModel.Name, "_") then
+                            displayCat = rawModel.Name 
+                        end
                     end
                     
                     local area = (rawModel and rawModel:GetAttribute("Zone")) or rec.Zone or "Unknown"
                     
-                    -- ==========================================================
-                    -- 🔴 SISTEMA DE MEDIÇÃO FÍSICA DE ESCALA
-                    -- ==========================================================
+                    -- 🔴 MEDIÇÃO FÍSICA
                     local scale = tonumber((rawModel and (rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))) or rec.Scale or rec.AssetScale)
-                    
                     if not scale and rawModel and rawModel:IsA("Model") then
                         pcall(function() scale = rawModel:GetScale() end)
-                        
                         if not scale or scale == 1 then
                             pcall(function()
                                 local extents = rawModel:GetExtentsSize()
                                 local maxAxis = math.max(extents.X, extents.Y, extents.Z)
-                                if maxAxis > 5 then
-                                    scale = maxAxis / 4.5
-                                end
+                                if maxAxis > 5 then scale = maxAxis / 4.5 end
                             end)
                         end
                     end
                     scale = tonumber(scale) or 1
-                    -- ==========================================================
                     
                     local basePeso = tonumber((rawModel and (rawModel:GetAttribute("Weight") or rawModel:GetAttribute("ModelWeight"))) or rec.Weight or rec.ModelWeight)
                     local mAttr = (rawModel and (rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation"))) or rec.Mutations or rec.Mutation
                     
                     local real, base = 0, 0
+                    local tryNames = {displayCat, cat, rawModel and rawModel.Name}
                     
-                    -- 1. CÁLCULO NATIVO RECUPERADO (Resolve os ovos normais)
-                    if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
-                        pcall(function() real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
-                        if real == 0 and displayCat ~= cat then
-                            pcall(function() real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = displayCat, Mutations = mAttr, Scale = scale})) or 0 end)
+                    -- VASCULHA TODOS OS MÓDULOS DE FORMA INTELIGENTE
+                    for _, n in ipairs(tryNames) do
+                        if not n or base > 0 then continue end
+                        -- Ovos de Evento (Halloween Pets)
+                        if hwPets and hwPets.Specs and hwPets.Specs[n] then
+                            base = tonumber(hwPets.Specs[n].EarningRate) or 0
+                            if not basePeso then basePeso = tonumber(hwPets.Specs[n].Weight or hwPets.Specs[n].ModelWeight) end
+                        end
+                        if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
+                            base = tonumber(assetsMod.Directory[n].EarningRate) or 0
+                            if not basePeso then basePeso = tonumber(assetsMod.Directory[n].ModelWeight) end
+                        end
+                        if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
+                            base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
+                            if not basePeso then basePeso = tonumber(pUtil.Assets.Directory[n].ModelWeight) end
+                        end
+                        -- Ovos Clássicos (Resolve o problema dos Ovos Normais a $1)
+                        if base == 0 and pUtil and pUtil.Assets and pUtil.Assets[n] then
+                            base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
                         end
                     end
                     
-                    -- 2. CÁLCULO MANUAL (Para eventos ou quando o nativo falha)
-                    if real == 0 then
+                    -- Fallback caso falhe nos módulos
+                    if base == 0 then
                         base = tonumber((rawModel and (rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))) or rec.Income or rec.EarningRate or rec.MoneyPerSecond) or 0
                         if base == 0 and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income) or 0 end
-                        
-                        if base == 0 then
-                            pcall(function() if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) or 0 end end)
+                    end
+                    base = (base == 0) and 1 or base
+                    
+                    -- MULTIPLICADORES DE MUTAÇÃO RESTAURADOS
+                    local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
+                    local mutMult = 1
+                    if mutModule and mAttr then
+                        pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
+                    elseif type(mAttr) == "table" then
+                        for _, m in pairs(mAttr) do
+                            local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
+                            mutMult = mutMult * val
                         end
-                        
-                        if base == 0 then
-                            local tryNames = {displayCat, cat, rawModel and rawModel.Name}
-                            for _, n in ipairs(tryNames) do
-                                if not n or base > 0 then continue end
-                                
-                                -- Módulo Clássico (Ovos Normais)
-                                if pUtil and pUtil.Assets and pUtil.Assets[n] then
-                                    base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
-                                end
-                                -- Módulos de Halloween (Ovos de Evento)
-                                if base == 0 and hwPets and hwPets.Specs and hwPets.Specs[n] then
-                                    base = tonumber(hwPets.Specs[n].EarningRate) or 0
-                                    if not basePeso then basePeso = tonumber(hwPets.Specs[n].Weight or hwPets.Specs[n].ModelWeight) end
-                                end
-                                if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
-                                    base = tonumber(assetsMod.Directory[n].EarningRate) or 0
-                                    if not basePeso then basePeso = tonumber(assetsMod.Directory[n].ModelWeight) end
-                                end
-                                if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
-                                    base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
-                                    if not basePeso then basePeso = tonumber(pUtil.Assets.Directory[n].ModelWeight) end
-                                end
-                            end
+                    elseif mAttr then 
+                        mutMult = 1.5 
+                    end
+                    
+                    real = math.floor((base * scaleMult * mutMult) + 0.5)
+
+                    -- TESTE DO CÁLCULO NATIVO (Se o motor interno gerar um valor maior, o radar assume esse valor)
+                    if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
+                        local nativeReal = 0
+                        pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
+                        if nativeReal == 0 and displayCat ~= cat then
+                            pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = displayCat, Mutations = mAttr, Scale = scale})) or 0 end)
                         end
-                        
-                        base = (base == 0) and 1 or base
-                        
-                        -- Matemática de Escala e Mutações recuperada
-                        local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
-                        local mutMult = 1
-                        if mutModule and mAttr then
-                            pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
-                        elseif type(mAttr) == "table" then
-                            for _, m in pairs(mAttr) do
-                                local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
-                                mutMult = mutMult * val
-                            end
-                        elseif mAttr then 
-                            mutMult = 1.5 
-                        end
-                        
-                        real = math.floor((base * scaleMult * mutMult) + 0.5)
+                        if nativeReal > real then real = nativeReal end
                     end
                     
                     local pesoFinal = basePeso and (basePeso * scale) or nil
@@ -617,11 +509,8 @@ task.spawn(function()
             end
             
             if stat then 
-                if h.AH and act == 0 then
-                    stat.Text = string.format("Status: Hop em %ds...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", math.max(0, math.floor(h.AHT - (os.clock() - lastValidEggTime))), total, act, formatNumber(b))
-                else
-                    stat.Text = string.format("Status: Scanning...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", total, act, formatNumber(b))
-                end
+                if h.AH and act == 0 then stat.Text = string.format("Status: Hop em %ds...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", math.max(0, math.floor(h.AHT - (os.clock() - lastValidEggTime))), total, act, formatNumber(b))
+                else stat.Text = string.format("Status: Scanning...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", total, act, formatNumber(b)) end
             end
             
             for k, v in pairs(Z) do
@@ -629,10 +518,7 @@ task.spawn(function()
                     if v.B then pcall(function() v.B:Destroy() end) end Z[k] = nil
                 end
             end
-            for k in pairs(cachedEggs) do
-                if not allUids[k] then cachedEggs[k] = nil end
-            end
-            
+            for k in pairs(cachedEggs) do if not allUids[k] then cachedEggs[k] = nil end end
         end)
     end
 end)
