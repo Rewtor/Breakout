@@ -802,10 +802,14 @@ task.spawn(function()
                 total = total + 1
                 
                 if not cachedEggs[u] then
-                    -- ADICIONADO: "PreparedSourceName" (nome real do ovo de Halloween)
-                    local cat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory"))) or rec.PreparedSourceName or rec.AssetCategory or rec.Category or "Egg"
+                    -- CORREÇÃO: O 'cat' volta a ser a classe original para a matemática do jogo não falhar
+                    local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory"))) or rec.AssetCategory or rec.Category or "Egg"
+                    
+                    -- NOVO: O 'displayCat' guarda o nome de Halloween para o Discord e ESP
+                    local displayCat = (rawModel and rawModel:GetAttribute("PreparedSourceName")) or rec.PreparedSourceName or cat
+                    
                     local area = (rawModel and (rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rawModel:GetAttribute("Zone"))) or rec.AreaId or rec.Zone or "Unknown"
-                    local rarity = getEggRarity(cat, rawModel, rec)
+                    local rarity = getEggRarity(displayCat, rawModel, rec)
 
                     local scale = rawModel and tonumber(rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))
                     if not scale then scale = tonumber(rec.Scale or rec.AssetScale) end
@@ -828,7 +832,8 @@ task.spawn(function()
                     end
                     
                     if real == 0 then
-                        local base = rawModel and tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))
+                        -- Adicionada verificação extra para atributos genéricos de eventos
+                        local base = rawModel and tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate") or rawModel:GetAttribute("BaseIncome") or rawModel:GetAttribute("EventIncome"))
                         if not base then base = tonumber(rec.Income or rec.EarningRate or rec.MoneyPerSecond) end
                         if (not base or base == 0) and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond) end
                         
@@ -865,7 +870,8 @@ task.spawn(function()
                     local pesoStr = peso and string.format("%.1f Kg", peso) or string.format("%.1fx", scale)
                     local checkSize = peso or scale or 0
                     
-                    cachedEggs[u] = {C=cat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
+                    -- Guarda todas as contas na memória! (Usando displayCat para aparecer bonito)
+                    cachedEggs[u] = {C=displayCat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
                 end
                 
                 local cData = cachedEggs[u]
