@@ -1,5 +1,5 @@
 -- ========================================================
--- RADAR V14 (DYNAMIC NATIVE ASSET READING PATCH)
+-- RADAR V15 (EXACT BASE EARNINGS PATCH - NO SCALE ESTIMATE)
 -- ========================================================
 local e = game:GetService("Players")
 local r = game:GetService("Workspace")
@@ -229,7 +229,7 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook (V15)", function()
+addBtn("Testar Webhook (V16)", function()
     if h.W == "" or not req then return end
     
     local playerName = o.Name
@@ -374,9 +374,6 @@ if not pUtil then pcall(function() pUtil = require(j.Shared.Util.AssetItems) end
 
 local AssetEarnings = nil pcall(function() AssetEarnings = require(j:WaitForChild("Shared", 5):WaitForChild("Util", 5):WaitForChild("AssetEarnings", 5)) end)
 if not AssetEarnings then pcall(function() AssetEarnings = require(j.Shared.Util.AssetEarnings) end) end
-
-local mutModule = nil pcall(function() mutModule = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Mutations", 5)) end)
-if not mutModule then pcall(function() mutModule = require(j.Shared.Modules.Mutations) end) end
 
 local hwPets = nil pcall(function() hwPets = require(j:FindFirstChild("HalloweenPets", true)) end)
 local assetsMod = nil pcall(function() assetsMod = require(j:FindFirstChild("Assets", true)) end)
@@ -523,11 +520,10 @@ local function Dk(u, m, d, isValid)
 end
 
 -- ========================================================
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Dinâmico V14)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Dinâmico V15 - Exato)
 -- ========================================================
 task.spawn(function()
     
-    -- 🔄 DICIONÁRIO DE SINÓNIMOS (ALIASES) PARA CORREÇÃO DE NOMES
     local EggAliases = {
         ["Rotshroom"] = "Toadstool",
         ["Rotshroom Egg"] = "Toadstool",
@@ -620,7 +616,6 @@ task.spawn(function()
                         end
                     end
                     
-                    -- APLICA OS ALIASES DE NOME
                     local cat = EggAliases[rawCat] or rawCat
                     local displayCat = EggAliases[rawDisplayCat] or rawDisplayCat
                     local rName = rawModel and (EggAliases[rawModel.Name] or rawModel.Name)
@@ -640,12 +635,10 @@ task.spawn(function()
                     end
                     scale = tonumber(scale) or 1
                     
-                    local mAttr = (rawModel and (rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation"))) or rec.Mutations or rec.Mutation
-                    
-                    local real, base = 0, 0
+                    local base = 0
                     local rarity = "Unknown"
                     
-                    -- 🔍 LEITURA DINÂMICA NATIVA DIRETO DOS MÓDULOS DO JOGO
+                    -- 🎯 PUXA DIRETAMENTE A TAXA BASE NATIVA DOS MÓDULOS (SEM ESTIMATIVA DE ESCALA)
                     local tryNames = {displayCat, cat, rName}
                     for _, n in ipairs(tryNames) do
                         if not n or base > 0 then continue end
@@ -669,30 +662,14 @@ task.spawn(function()
                     end
                     
                     rarity = getEggRarity(displayCat, rawModel, rec)
-                    
                     base = (base == 0) and 1 or base
                     
-                    local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
-                    local mutMult = 1
-                    if mutModule and mAttr then
-                        pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
-                    elseif type(mAttr) == "table" then
-                        for _, m in pairs(mAttr) do
-                            local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
-                            mutMult = mutMult * val
-                        end
-                    elseif mAttr then 
-                        mutMult = 1.5 
-                    end
+                    -- Define o valor exato oficial sem aplicação de fórmulas customizadas
+                    local real = base
                     
-                    real = math.floor((base * scaleMult * mutMult) + 0.5)
-
                     if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
                         local nativeReal = 0
-                        pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
-                        if nativeReal == 0 and displayCat ~= cat then
-                            pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = displayCat, Mutations = mAttr, Scale = scale})) or 0 end)
-                        end
+                        pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Scale = scale})) or 0 end)
                         if nativeReal > real then real = nativeReal end
                     end
                     
