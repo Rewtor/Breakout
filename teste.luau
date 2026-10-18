@@ -722,8 +722,10 @@ end
 
 
 -- ========================================================
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Otimizado)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Turbinado)
 -- ========================================================
+local eggFoldersCache = {} -- Memória das pastas secretas descobertas
+
 task.spawn(function()
     while task.wait(1.5) do
         pcall(function()
@@ -733,6 +735,20 @@ task.spawn(function()
             if os.clock() - lastReset >= 10 then
                 b = 0
                 lastReset = os.clock()
+                
+                -- 1. BUSCA DINÂMICA DE PASTAS (Bypassa o cenário novo do portal)
+                -- Vasculha o mapa inteiro buscando ONDE os ovos estão escondidos.
+                -- Ignora nomes. Se o objeto tiver "UID", achamos a pasta dele.
+                eggFoldersCache = {}
+                for _, desc in ipairs(r:GetDescendants()) do
+                    if desc:IsA("Model") or desc:IsA("BasePart") then
+                        if desc:GetAttribute("UID") or desc:GetAttribute("Uid") or desc:GetAttribute("EggUid") then
+                            if desc.Parent then
+                                eggFoldersCache[desc.Parent] = true
+                            end
+                        end
+                    end
+                end
             end
             
             local allUids = {}
@@ -750,19 +766,17 @@ task.spawn(function()
                 end
             end
             
-            -- Busca as pastas normais
+            -- Escaneia as pastas originais + todas as pastas escondidas descobertas
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
             scanFolder(r:FindFirstChild("__DEBRIS"))
-            
-            -- NOVO: Busca dinâmica! Se o update criou uma pasta nova no Workspace 
-            -- (ex: "HalloweenEggSlotsClient"), o script acha e lê automaticamente!
-            for _, folder in ipairs(r:GetChildren()) do
-                if folder:IsA("Folder") and string.find(string.lower(folder.Name), "eggslots") and folder.Name ~= "AreaEggSlotsClient" then
-                    scanFolder(folder)
-                end
+            for folder in pairs(eggFoldersCache) do
+                scanFolder(folder)
             end
             
+            -- 2. BUSCA DINÂMICA DE BANCO DE DADOS (Bypassa o StreamingEnabled de Eventos)
             local records = {}
+            
+            -- Tenta ler o state normal primeiro
             if s then
                 local st, fd = false, nil
                 if s.ReadFieldEggs then st, fd = pcall(s.ReadFieldEggs)
@@ -772,17 +786,45 @@ task.spawn(function()
                     local rawRec = fd.Records or fd
                     if type(rawRec) == "table" then
                         for k, rec in pairs(rawRec) do
-                            if type(rec) == "table" then
-                                local u = tostring(rec.Uid or k)
-                                records[u] = rec
-                                -- O SEGREDO ESTÁ AQUI: Adiciona na lista de processamento 
-                                -- mesmo se o modelo 3D estiver longe demais pra carregar!
-                                allUids[u] = true 
-                            end
+                            if type(rec) == "table" then records[tostring(rec.Uid or k)] = rec end
                         end
                     end
                 end
             end
+            
+            -- NOVO: Tenta invadir módulos de Evento escondidos no jogo (ex: HalloweenEggState)
+            pcall(function()
+                local clientModules = j:WaitForChild("Client", 2)
+                if clientModules then
+                    for _, stateMod in ipairs(clientModules:GetChildren()) do
+                        local modName = string.lower(stateMod.Name)
+                        if stateMod:IsA("ModuleScript") and stateMod.Name ~= "EggState" and (string.find(modName, "egg") or string.find(modName, "event") or string.find(modName, "halloween")) then
+                            pcall(function()
+                                local sMod = require(stateMod)
+                                local fd = nil
+                                if sMod.ReadFieldEggs then _, fd = pcall(sMod.ReadFieldEggs)
+                                elseif sMod.SyncFieldEggs then _, fd = pcall(sMod.SyncFieldEggs) end
+                                
+                                if fd and type(fd) == "table" then
+                                    local rawRec = fd.Records or fd
+                                    if type(rawRec) == "table" then
+                                        for k, rec in pairs(rawRec) do
+                                            if type(rec) == "table" then 
+                                                local u = tostring(rec.Uid or k)
+                                                records[u] = rec
+                                                allUids[u] = true -- Força a leitura mesmo a 50 mil blocos de distância
+                                            end
+                                        end
+                                    end
+                                end
+                            end)
+                        end
+                    end
+                end
+            end)
+            
+            -- Garante que os ovos lidos pelo banco de dados também entrem no radar
+            for u in pairs(records) do allUids[u] = true end
             
             for u in pairs(allUids) do
                 local rawModel = pModels[u]
@@ -791,7 +833,6 @@ task.spawn(function()
                 total = total + 1
                 
                 if not cachedEggs[u] then
-                    -- Usa o rawModel se existir, se não (muito longe), puxa dos records (rec)
                     local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory"))) or rec.AssetCategory or rec.Category or "Egg"
                     local area = (rawModel and (rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area"))) or rec.AreaId or "Unknown"
                     local rarity = getEggRarity(cat, rawModel, rec)
@@ -871,7 +912,6 @@ task.spawn(function()
                     end
                 end
                 
-                -- O ESP Textual Visual só é desenhado se o ovo estiver perto o suficiente pra ter modelo 3D
                 if rawModel then
                     local pModel = rawModel
                     if pModel:IsA("Folder") then
@@ -896,7 +936,6 @@ task.spawn(function()
                 end
             end
             
-            -- Limpeza de memória baseada na lista global (allUids) para não esquecer os ovos de longe
             for k, v in pairs(Z) do
                 if not allUids[k] or not v.M or not v.M.Parent then
                     if v.B then pcall(function() v.B:Destroy() end) end
