@@ -575,21 +575,36 @@ task.spawn(function()
             local function scanFolder(folder)
                 if not folder then return end
                 for _, v in ipairs(folder:GetChildren()) do
-                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v.Name
-                    if uidAttr then pModels[tostring(uidAttr)] = v end
+                    -- Tenta pegar o UID oficial do ovo
+                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid")
+                    
+                    -- FILTRO DE SEGURANÇA: Se não tem UID, só aceita se tiver algum atributo de ovo
+                    if not uidAttr then
+                        if v:GetAttribute("Category") or v:GetAttribute("AssetCategory") or v:GetAttribute("Income") or v:GetAttribute("EarningRate") then
+                            uidAttr = v.Name
+                        end
+                    end
+
+                    -- Só adiciona na lista se passou no filtro (ignora paredes, árvores e zonas)
+                    if uidAttr then 
+                        pModels[tostring(uidAttr)] = v 
+                    end
                 end
             end
             
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
             scanFolder(r:FindFirstChild("__DEBRIS"))
             
-           -- Scan varrendo a Dimensão de Halloween inteira (todas as subpastas simultaneamente)
+            -- Varredura inteligente do Halloween: só olha pastas que realmente guardam ovos
             local hwDimension = r:FindFirstChild("HalloweenDimension")
             if hwDimension then
-                -- Em vez de procurar só na "WorldEggs", varre qualquer pasta que estiver lá dentro
                 for _, child in ipairs(hwDimension:GetChildren()) do
                     if child:IsA("Folder") or child:IsA("Model") then
-                        scanFolder(child)
+                        local n = string.lower(child.Name)
+                        -- Filtra para não ler o cenário (BorderCollision, Zones, etc)
+                        if string.find(n, "egg") or string.find(n, "pet") or string.find(n, "drop") then
+                            scanFolder(child)
+                        end
                     end
                 end
             end
