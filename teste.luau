@@ -1,5 +1,5 @@
 -- ========================================================
--- 1. IMPORTAÇÃO DOS SERVIÇOS DO ROBLOX
+-- RADAR V13 (HALLOWEEN DEFINITIVE PATCH + FULL ALIASES FIX)
 -- ========================================================
 local e = game:GetService("Players")
 local r = game:GetService("Workspace")
@@ -37,7 +37,7 @@ h.PC = tonumber(h.PC) or 1
 
 local X = {} 
 local Z = {} 
-local cachedEggs = {} -- OTIMIZAÇÃO MÁXIMA: Memória para não sobrecarregar o dispositivo
+local cachedEggs = {}
 local b = 0  
 local isHopping = false 
 local lastReset = os.clock()
@@ -229,7 +229,7 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook (V10)", function()
+addBtn("Testar Webhook (V13)", function()
     if h.W == "" or not req then return end
     
     local playerName = o.Name
@@ -289,7 +289,7 @@ addBtn("Salvar Configurações", function()
 end)
 
 -- ========================================================
--- 4. SISTEMA DE SERVER HOP (Busca Rápida com Paragem Inteligente)
+-- 4. SISTEMA DE SERVER HOP
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
@@ -523,49 +523,21 @@ local function Dk(u, m, d, isValid)
 end
 
 -- ========================================================
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Definitivo V12)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Definitivo V13)
 -- ========================================================
 task.spawn(function()
-    
-    -- 🎃 BASE DE DADOS SUPREMA DE HALLOWEEN 🎃
-    local HalloweenDB = {
-        ["Hexed Pumpkin"] = {Base = 150000000, Rar = "Cosmic"},
-        ["Graveyard Brute"] = {Base = 75000000, Rar = "Secret"},
-        ["Toadstool"] = {Base = 1600000, Rar = "Mythic"},
-        ["Haunted Scorpio"] = {Base = 30000000, Rar = "Cosmic"},
-        ["Crowshade"] = {Base = 4500000, Rar = "Mythic"},
-        ["Shelltide Voyager"] = {Base = 1600000000, Rar = "Eternal"},
-        ["Halloween Gigantopithecus"] = {Base = 1500000000, Rar = "Eternal"},
-        ["Werewolf"] = {Base = 1300000000, Rar = "Secret"},
-        ["Mimic Chest"] = {Base = 600000, Rar = "Legendary"},
-        ["Zombified Halloween Glyptodon"] = {Base = 800000000, Rar = "Secret"},
-        ["Zombified Halloween Dunkleosteus"] = {Base = 4000000000, Rar = "Eternal"},
-        ["BloodBloom"] = {Base = 450000000, Rar = "Secret"},
-        ["Hooded Gerbil"] = {Base = 300000, Rar = "Legendary"},
-        ["Ghost Reaper"] = {Base = 300000000, Rar = "Eternal"},
-        ["Abomination Kong"] = {Base = 3500000000, Rar = "Eternal"},
-        ["Patchwork Imp"] = {Base = 20000000, Rar = "Cosmic"},
-        ["Voidseer Pumpkin"] = {Base = 14000000000, Rar = "Divine"},
-        ["Halloween Terrorbird"] = {Base = 160000, Rar = "Mythic"},
-        ["Halloween Dunkleosteus"] = {Base = 450000000, Rar = "Secret"},
-        ["Zombified Halloween Terrorbird"] = {Base = 1100000000, Rar = "Secret"},
-        ["Zombified Halloween Gigantopithecus"] = {Base = 6000000000, Rar = "Eternal"},
-        ["Candlefang"] = {Base = 225000, Rar = "Mythic"},
-        ["Jesterpop"] = {Base = 40000, Rar = "Legendary"},
-        ["Whiskers"] = {Base = 2000, Rar = "Epic"},
-        ["Zombified Halloween Sabertooth"] = {Base = 14000000000, Rar = "Divine"},
-        ["Halloween Sabertooth"] = {Base = 7500000000, Rar = "Divine"},
-        ["Halloween Glyptodon"] = {Base = 35000, Rar = "Legendary"},
-        ["Spirit Knight"] = {Base = 3000000, Rar = "Cosmic"},
-        ["Zombified Halloween Megatherium"] = {Base = 1400000000, Rar = "Secret"},
-        ["Halloween Megatherium"] = {Base = 6000000, Rar = "Cosmic"},
-    }
 
-    -- 🔄 DICIONÁRIO DE SINÓNIMOS (ALIASES) 🔄
+    -- 🔄 DICIONÁRIO DE SINÓNIMOS (ALIASES) COMPLETO 🔄
     local EggAliases = {
+        ["Rotshroom"] = "Toadstool",
+        ["Rotshroom Egg"] = "Toadstool",
+        ["Dread Wolf"] = "Werewolf",
+        ["Halloween Royal Mimic Egg"] = "Mimic Chest",
         ["Royal Mimic Egg"] = "Mimic Chest",
         ["Royal Mimic"] = "Mimic Chest",
-        ["Rotshroom Egg"] = "Rotshroom",
+        ["Frankenstein Kong Egg"] = "Abomination Kong",
+        ["Quilted Imp Egg"] = "Patchwork Imp",
+        ["SpiritKnight"] = "Spirit Knight",
     }
 
     while task.wait(1.5) do
@@ -648,7 +620,7 @@ task.spawn(function()
                         end
                     end
                     
-                    -- APLICA OS ALIASES DE NOME
+                    -- APLICA OS ALIASES DE NOME COMPLETO
                     local cat = EggAliases[rawCat] or rawCat
                     local displayCat = EggAliases[rawDisplayCat] or rawDisplayCat
                     local rName = rawModel and (EggAliases[rawModel.Name] or rawModel.Name)
@@ -680,7 +652,6 @@ task.spawn(function()
                         base = hwData.Base
                         rarity = hwData.Rar
                     else
-                        -- Busca nos módulos normais do jogo (Ovos Clássicos)
                         local tryNames = {displayCat, cat, rName}
                         for _, n in ipairs(tryNames) do
                             if not n or base > 0 then continue end
@@ -708,7 +679,6 @@ task.spawn(function()
                     
                     base = (base == 0) and 1 or base
                     
-                    -- Matemática de Escala e Mutações
                     local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
                     local mutMult = 1
                     if mutModule and mAttr then
@@ -724,7 +694,6 @@ task.spawn(function()
                     
                     real = math.floor((base * scaleMult * mutMult) + 0.5)
 
-                    -- Fallback para cálculo nativo se necessário
                     if not hwData and AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
                         local nativeReal = 0
                         pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
@@ -734,7 +703,6 @@ task.spawn(function()
                         if nativeReal > real then real = nativeReal end
                     end
                     
-                    -- 🔴 FORMATO DE PESO/ESCALA FIXO EM "X" (Ex: 1.0x) CONFORME SOLICITADO
                     local pesoStr = string.format("%.1fx", scale)
                     local checkSize = scale
                     
