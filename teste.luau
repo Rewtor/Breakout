@@ -1,5 +1,5 @@
 -- ========================================================
--- RADAR V8 (HALLOWEEN + CLASSIC FIX + CLEAN NAMES)
+-- 1. IMPORTAÇÃO DOS SERVIÇOS DO ROBLOX
 -- ========================================================
 local e = game:GetService("Players")
 local r = game:GetService("Workspace")
@@ -14,7 +14,7 @@ local o = e.LocalPlayer
 local req = (syn and syn.request) or http_request or request or HttpPost
 
 -- ========================================================
--- CONFIGURAÇÕES PADRÃO E GESTÃO DE FICHEIRO JSON
+-- 2. CONFIGURAÇÕES PADRÃO E GESTÃO DE FICHEIRO JSON
 -- ========================================================
 local h = {W="", P="", I=0, S=0, E=true, WH=false, AH=false, AHT=60, PC=1}
 local cfgFile = "DiceRadar_Config.json"
@@ -22,7 +22,11 @@ local cfgFile = "DiceRadar_Config.json"
 if isfile and readfile and isfile(cfgFile) then
     pcall(function()
         local saved = a:JSONDecode(readfile(cfgFile))
-        if type(saved) == "table" then for k, v in pairs(saved) do h[k] = v end end
+        if type(saved) == "table" then
+            for k, v in pairs(saved) do
+                h[k] = v
+            end
+        end
     end)
 end
 
@@ -31,12 +35,16 @@ h.S = tonumber(h.S) or 0
 h.AHT = tonumber(h.AHT) or 60
 h.PC = tonumber(h.PC) or 1
 
-local X, Z, cachedEggs = {}, {}, {}
-local b, isHopping = 0, false
-local lastReset, lastValidEggTime = os.clock(), os.clock()
+local X = {} 
+local Z = {} 
+local cachedEggs = {} -- OTIMIZAÇÃO MÁXIMA: Memória para não sobrecarregar o dispositivo
+local b = 0  
+local isHopping = false 
+local lastReset = os.clock()
+local lastValidEggTime = os.clock() 
 
 -- ========================================================
--- CONSTRUÇÃO DA INTERFACE GRÁFICA (GUI)
+-- 3. CONSTRUÇÃO DA INTERFACE GRÁFICA (GUI) - MINIMIZÁVEL
 -- ========================================================
 if c:FindFirstChild("DiceRadarGUI") then c.DiceRadarGUI:Destroy() end
 
@@ -185,10 +193,16 @@ addBox("Auto Hop Timer (s)", h.AHT, function(v) h.AHT = tonumber(v) or 60 end)
 
 addTog("Enable ESP", h.E, function(v) 
     h.E = v 
-    for k, esp in pairs(Z) do if esp.B then pcall(function() esp.B.Enabled = v end) end end
+    for k, esp in pairs(Z) do
+        if esp.B then pcall(function() esp.B.Enabled = v end) end
+    end
 end)
+
 addTog("Enable Webhooks", h.WH, function(v) h.WH = v end)
-addTog("Auto Server Hop", h.AH, function(v) h.AH = v; lastValidEggTime = os.clock() end)
+addTog("Auto Server Hop", h.AH, function(v) 
+    h.AH = v 
+    lastValidEggTime = os.clock() 
+end)
 
 local fPC = Instance.new("Frame", cont)
 fPC.Size = UDim2.new(1, 0, 0, 30)
@@ -215,12 +229,18 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook V8", function()
+addBtn("Testar Webhook (V10)", function()
     if h.W == "" or not req then return end
-    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(game.PlaceId) .. "&jobId=" .. tostring(game.JobId)
+    
+    local playerName = o.Name
+    local placeId = game.PlaceId
+    local jobId = game.JobId
+    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
 
     local eggList = {}
-    for u, d in pairs(cachedEggs) do table.insert(eggList, d) end
+    for u, d in pairs(cachedEggs) do
+        table.insert(eggList, d)
+    end
     table.sort(eggList, function(a, b) return (a.R or 0) > (b.R or 0) end)
     
     local eggString = ""
@@ -232,45 +252,71 @@ addBtn("Testar Webhook V8", function()
         end
         eggString = eggString .. string.format("• **%s** (%s) | $%s/s\n", d.C, d.P, formatNumber(d.R))
     end
-    if #eggList == 0 then eggString = "Nenhum ovo carregado no mapa no momento." end
+    
+    if #eggList == 0 then
+        eggString = "Nenhum ovo carregado no mapa no momento."
+    end
 
-    local m = "Teste de Ping do Radar!" .. (h.P ~= "" and " <@"..h.P..">" or "")
+    local m = ""
+    if h.P ~= "" then 
+        m = "Teste de Ping do Radar! <@"..h.P..">" 
+    else
+        m = "Teste de Ping do Radar!"
+    end
+    
     local E = {{
         title = "✅ Conexão Estabelecida!",
         description = "O Webhook do Dice Radar está configurado.\n\n**📋 Top Ovos no Mapa Atual:**\n" .. eggString,
-        url = joinLink, color = 65352,
+        url = joinLink,
+        color = 65352,
         fields = {
-            {name = "👤 Conta Testando", value = "**" .. o.Name .. "**", inline = true},
+            {name = "👤 Conta Testando", value = "**" .. playerName .. "**", inline = true},
             {name = "🔗 Servidor Atual", value = "[Clique para Join (Netlify)](" .. joinLink .. ")", inline = true},
         }
     }}
-    pcall(function() req({Url=h.W, Method="POST", Headers={["Content-Type"]="application/json"}, Body=a:JSONEncode({content=m, embeds=E})}) end)
+    
+    pcall(function()
+        req({Url=h.W, Method="POST", Headers={["Content-Type"]="application/json"}, Body=a:JSONEncode({content=m, embeds=E})})
+    end)
 end)
 
 addBtn("Salvar Configurações", function()
-    if writefile then pcall(function() writefile(cfgFile, a:JSONEncode(h)) end) end
+    if writefile then
+        pcall(function()
+            writefile(cfgFile, a:JSONEncode(h))
+        end)
+    end
 end)
 
 -- ========================================================
--- SISTEMA DE SERVER HOP
+-- 4. SISTEMA DE SERVER HOP (Busca Rápida com Paragem Inteligente)
 -- ========================================================
 local function doServerHop()
     if isHopping then return end
-    isHopping = true
+    isHopping = true 
+    
     pcall(function()
         if stat then stat.Text = "Status: Procurando servidores (Modo Rápido)..." end
+        
         local baseUrl = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
         local cursor = ""
         local availableServers = {}
         local pagesLoaded = 0
+        local maxPages = 30
         
-        while pagesLoaded < 30 do
-            local currentUrl = baseUrl .. (cursor ~= "" and "&cursor=" .. cursor or "") .. "&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
+        while pagesLoaded < maxPages do
+            local currentUrl = baseUrl
+            if cursor ~= "" then
+                currentUrl = currentUrl .. "&cursor=" .. cursor
+            end
+            currentUrl = currentUrl .. "&_nocache=" .. tostring(os.clock() + math.random(10000, 99999))
+            
             local success, result = pcall(function() return game:HttpGet(currentUrl) end)
             
             if not success or not result then
                 if stat then stat.Text = "Status: Roblox limitou a busca. Pausa de 1s..." end
-                task.wait(1) continue
+                task.wait(1)
+                continue
             end
             
             local data = a:JSONDecode(result)
@@ -280,15 +326,33 @@ local function doServerHop()
                         table.insert(availableServers, v.id)
                     end
                 end
-                if #availableServers >= 8 then break end
-                if data.nextPageCursor then cursor = data.nextPageCursor; pagesLoaded = pagesLoaded + 1 else break end
-            else break end
+                
+                if #availableServers >= 8 then
+                    break
+                end
+                
+                if data.nextPageCursor then
+                    cursor = data.nextPageCursor
+                    pagesLoaded = pagesLoaded + 1
+                else
+                    break
+                end
+            else
+                break
+            end
         end
         
         if #availableServers > 0 then
             math.randomseed(os.clock())
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, availableServers[math.random(1, #availableServers)], o)
-            task.delay(8, function() isHopping = false; lastValidEggTime = os.clock() end)
+            local randomServerId = availableServers[math.random(1, #availableServers)]
+            
+            if stat then stat.Text = "Status: Teleportando..." end
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, o)
+            
+            task.delay(8, function()
+                isHopping = false
+                lastValidEggTime = os.clock()
+            end)
             return
         end
         
@@ -296,138 +360,273 @@ local function doServerHop()
         if stat then stat.Text = "Status: Erro ao achar servidor. Tentando de novo..." end
     end)
 end
+
 addBtn("Server Hop (Servidor Vazio)", doServerHop)
 
 -- ========================================================
--- MÓDULOS INTERNOS DO JOGO (TODOS RESTAURADOS)
+-- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
 -- ========================================================
 local s = nil pcall(function() s = require(j:WaitForChild("Client", 5):WaitForChild("EggState", 5)) end)
+if not s then pcall(function() s = require(j.Client.EggState) end) end
+
 local pUtil = nil pcall(function() pUtil = require(j:WaitForChild("Shared", 5):WaitForChild("Util", 5):WaitForChild("AssetItems", 5)) end)
+if not pUtil then pcall(function() pUtil = require(j.Shared.Util.AssetItems) end) end
+
 local AssetEarnings = nil pcall(function() AssetEarnings = require(j:WaitForChild("Shared", 5):WaitForChild("Util", 5):WaitForChild("AssetEarnings", 5)) end)
+if not AssetEarnings then pcall(function() AssetEarnings = require(j.Shared.Util.AssetEarnings) end) end
+
 local mutModule = nil pcall(function() mutModule = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Mutations", 5)) end)
+if not mutModule then pcall(function() mutModule = require(j.Shared.Modules.Mutations) end) end
+
 local hwPets = nil pcall(function() hwPets = require(j:FindFirstChild("HalloweenPets", true)) end)
 local assetsMod = nil pcall(function() assetsMod = require(j:FindFirstChild("Assets", true)) end)
 
 -- ========================================================
--- DISCORD WEBHOOK E ESP
+-- 6. EXTRAÇÃO INTELIGENTE DE RARIDADE DOS OVOS
+-- ========================================================
+local function getEggRarity(cat, rawModel, rec)
+    local rar = "Unknown"
+    if rawModel then 
+        rar = rawModel:GetAttribute("Rarity") or rawModel:GetAttribute("RarityTier") or rawModel:GetAttribute("Tier") or rar 
+    end
+    if rar == "Unknown" and rec and rec.Rarity then 
+        rar = rec.Rarity 
+    end
+    if type(rar) == "table" then 
+        rar = rar.DisplayName or rar.Name or rar._id or "Unknown" 
+    end
+    if rar == "Unknown" then
+        pcall(function()
+            if pUtil and pUtil.Assets and pUtil.Assets[cat] then
+                local ast = pUtil.Assets[cat]
+                local rData = ast.Rarity or (ast.Egg and ast.Egg.Rarity)
+                if type(rData) == "table" then 
+                    rar = rData.DisplayName or rData.Name or rData._id or "Unknown"
+                elseif type(rData) == "string" then 
+                    rar = rData 
+                end
+            end
+        end)
+    end
+    rar = tostring(rar)
+    
+    local searchStr = string.lower(string.format("%s %s %s", tostring(cat), tostring(rec and rec.Uid or ""), tostring(rawModel and rawModel.Name or "")))
+    local lowerRar = string.lower(rar)
+    
+    local function checkMatch(str)
+        if string.find(str, "divine") then return "Divine" end
+        if string.find(str, "eternal") then return "Eternal" end
+        if string.find(str, "secret") then return "Secret" end
+        if string.find(str, "cosmic") then return "Cosmic" end
+        if string.find(str, "mythic") then return "Mythic" end
+        if string.find(str, "legendary") then return "Legendary" end
+        if string.find(str, "epic") then return "Epic" end
+        if string.find(str, "rare") then return "Rare" end
+        if string.find(str, "uncommon") then return "Uncommon" end
+        if string.find(str, "common") then return "Common" end
+        return nil
+    end
+
+    local match = checkMatch(lowerRar)
+    if match then return match end
+    match = checkMatch(searchStr)
+    if match then return match end
+    
+    if string.find(searchStr, "nightflame") or string.find(searchStr, "unicornegg") or string.find(searchStr, "unicorn egg") or string.find(searchStr, "shatteredcolossus") or string.find(searchStr, "kitsune") or string.find(searchStr, "elmaja") or string.find(searchStr, "el maja") then return "Divine" end
+    if string.find(searchStr, "gorillaking") or string.find(searchStr, "gorilla king") or string.find(searchStr, "lunardragon") or string.find(searchStr, "lunar dragon") or string.find(searchStr, "onitiger") or string.find(searchStr, "oni tiger") or string.find(searchStr, "mosasaurus") then return "Eternal" end
+    if string.find(searchStr, "mutantshark") or string.find(searchStr, "mutant shark") or string.find(searchStr, "skeletonboss") or string.find(searchStr, "skeleton boss") or string.find(searchStr, "stagegg") or string.find(searchStr, "stag egg") or string.find(searchStr, "cosmicdragon") or string.find(searchStr, "cosmic dragon") or string.find(searchStr, "trex") or string.find(searchStr, "t-rex") or string.find(searchStr, "tralaledon") or string.find(searchStr, "kraken") then return "Secret" end
+    if string.find(searchStr, "saturnita") or string.find(searchStr, "saturno") or string.find(searchStr, "mantaris") or string.find(searchStr, "mantis") or string.find(searchStr, "moth") or string.find(searchStr, "imp") or string.find(searchStr, "rhinotaur") or string.find(searchStr, "snowyowl") or string.find(searchStr, "snowy owl") or string.find(searchStr, "koiegg") or string.find(searchStr, "koi egg") or string.find(searchStr, "triceratops") or string.find(searchStr, "bronto") or string.find(searchStr, "whaleshark") or string.find(searchStr, "whale shark") or string.find(searchStr, "belugawhale") or string.find(searchStr, "beluga whale") then return "Cosmic" end
+    if string.find(searchStr, "bladehide") or string.find(searchStr, "redpanda") or string.find(searchStr, "red panda") or string.find(searchStr, "cosmicgorilla") or string.find(searchStr, "cosmic gorilla") or string.find(searchStr, "ankylosaurus") or string.find(searchStr, "orca") then return "Mythic" end
+    if string.find(searchStr, "spideron") or string.find(searchStr, "crustacia") or string.find(searchStr, "salamander") or string.find(searchStr, "cosmicgecko") or string.find(searchStr, "cosmic gecko") or string.find(searchStr, "pterodactyl") or string.find(searchStr, "sharkegg") or string.find(searchStr, "shark egg") then return "Legendary" end
+    if string.find(searchStr, "crane") or string.find(searchStr, "centapede") or string.find(searchStr, "swordfish") then return "Epic" end
+    if string.find(searchStr, "dodo") or string.find(searchStr, "parrotfish") then return "Rare" end
+
+    local income = tonumber(rec and rec.EarningRate or rec and rec.Income or rawModel and rawModel:GetAttribute("Income") or 0)
+    if income and income >= 150000000 then return "Secret" end
+
+    if rar ~= "Unknown" then return rar end
+    return "Normal"
+end
+
+-- ========================================================
+-- 7. SISTEMA DE DISCORD WEBHOOK (Notificações)
 -- ========================================================
 local function Wk(d)
     if not h.WH or h.W == "" or not req then return end
-    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(game.PlaceId) .. "&jobId=" .. tostring(game.JobId)
-    local m = "**" .. o.Name .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "**" .. (h.P ~= "" and " <@"..h.P..">" or " pega la")
+
+    local playerName = o.Name
+    local placeId = game.PlaceId
+    local jobId = game.JobId
+    
+    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
+    
+    local m = ""
+    if h.P ~= "" then 
+        m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "** <@"..h.P..">" 
+    else
+        m = "**" .. playerName .. "** encontrou **" .. tostring(d.C) .. "** de **" .. formatNumber(d.R) ..  "** pega la"
+    end
+    
     local E = {{
-        title = "🥚 Ovo Gigante DETECTADO!", url = joinLink, color = 65352,
+        title = "🥚 Ovo Gigante DETECTADO!",
+        url = joinLink,
+        color = 65352,
         fields = {
-            {name = "Categoria", value = d.C, inline = true}, {name = "Area", value = d.A, inline = true},
-            {name = "Raridade", value = d.Rar, inline = true}, {name = "Tamanho", value = d.P, inline = true},
+            {name = "Categoria", value = d.C, inline = true},
+            {name = "Area", value = d.A, inline = true},
+            {name = "Raridade", value = d.Rar, inline = true},
+            {name = "Tamanho", value = d.P, inline = true},
             {name = "Dinheiro/S", value = "$" .. formatNumber(d.R) .. "/s", inline = true},
-            {name = "🔗 Link de Join", value = "[Abrir Servidor](" .. joinLink .. ")", inline = false},
+            {name = "🔗 Link de Join Automático", value = "[Abrir Servidor](" .. joinLink .. ")", inline = false},
         }
     }}
-    pcall(function() req({Url = h.W, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = a:JSONEncode({content = m, embeds = E})}) end)
+    
+    pcall(function()
+        req({Url = h.W, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = a:JSONEncode({content = m, embeds = E})})
+    end)
 end
 
+-- ========================================================
+-- 8. SISTEMA DE ESP VISUAL (Apenas Texto - Sem Highlight)
+-- ========================================================
 local function Dk(u, m, d, isValid)
     if not m then return end
+    
+    local isVisible = h.E and isValid
+
     if Z[u] then 
-        if Z[u].B and Z[u].B:FindFirstChild("TextLabel") then Z[u].B.TextLabel.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P) end
-        if Z[u].B then pcall(function() Z[u].B.Enabled = h.E and isValid end) end
+        if Z[u].B and Z[u].B:FindFirstChild("TextLabel") then
+            Z[u].B.TextLabel.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P)
+        end
+        if Z[u].B then pcall(function() Z[u].B.Enabled = isVisible end) end
         return 
     end
-    if not (h.E and isValid) then return end
+    
+    if not isVisible then return end
+    
     local bb = Instance.new("BillboardGui", m)
-    bb.Size = UDim2.new(0, 150, 0, 50); bb.StudsOffset = Vector3.new(0, 4, 0); bb.AlwaysOnTop = true
+    bb.Size = UDim2.new(0, 150, 0, 50)
+    bb.StudsOffset = Vector3.new(0, 4, 0)
+    bb.AlwaysOnTop = true
+    bb.Enabled = true
+    
     local tl = Instance.new("TextLabel", bb)
-    tl.Size = UDim2.new(1, 0, 1, 0); tl.BackgroundTransparency = 1
-    tl.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P); tl.TextColor3 = Color3.fromRGB(0, 195, 255)
-    tl.TextStrokeTransparency = 0.2; tl.Font = Enum.Font.GothamBold; tl.TextSize = 11
+    tl.Size = UDim2.new(1, 0, 1, 0)
+    tl.BackgroundTransparency = 1
+    tl.Text = string.format("[%s]\n$%s/s | %s", d.C, formatNumber(d.R), d.P)
+    tl.TextColor3 = Color3.fromRGB(0, 195, 255)
+    tl.TextStrokeTransparency = 0.2
+    tl.Font = Enum.Font.GothamBold
+    tl.TextSize = 11
+    
     Z[u] = {B = bb, M = m}
 end
 
 -- ========================================================
--- 7. MOTOR DE VARREDURA PRINCIPAL (V11 - DATABASE + ALIASES)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Definitivo V12)
 -- ========================================================
 task.spawn(function()
     
     -- 🎃 BASE DE DADOS SUPREMA DE HALLOWEEN 🎃
     local HalloweenDB = {
-        ["Hexed Pumpkin"] = {Base = 150000000, Weight = 18.32, Rar = "Cosmic"},
-        ["Graveyard Brute"] = {Base = 75000000, Weight = 1.24, Rar = "Secret"},
-        ["Toadstool"] = {Base = 1600000, Weight = 27.27, Rar = "Mythic"},
-        ["Haunted Scorpio"] = {Base = 30000000, Weight = 13.96, Rar = "Cosmic"},
-        ["Crowshade"] = {Base = 4500000, Weight = 37.51, Rar = "Mythic"},
-        ["Shelltide Voyager"] = {Base = 1600000000, Weight = 0.31, Rar = "Eternal"},
-        ["Halloween Gigantopithecus"] = {Base = 1500000000, Weight = 6.5, Rar = "Eternal"},
-        ["Werewolf"] = {Base = 1300000000, Weight = 0.74, Rar = "Secret"},
-        ["Mimic Chest"] = {Base = 600000, Weight = 43.1, Rar = "Legendary"},
-        ["Zombified Halloween Glyptodon"] = {Base = 800000000, Weight = 39, Rar = "Secret"},
-        ["Zombified Halloween Dunkleosteus"] = {Base = 4000000000, Weight = 11, Rar = "Eternal"},
-        ["BloodBloom"] = {Base = 450000000, Weight = 1.24, Rar = "Secret"},
-        ["Hooded Gerbil"] = {Base = 300000, Weight = 38.39, Rar = "Legendary"},
-        ["Ghost Reaper"] = {Base = 300000000, Weight = 0.31, Rar = "Eternal"},
-        ["Abomination Kong"] = {Base = 3500000000, Weight = 0.31, Rar = "Eternal"},
-        ["Patchwork Imp"] = {Base = 20000000, Weight = 18.83, Rar = "Cosmic"},
-        ["Voidseer Pumpkin"] = {Base = 14000000000, Weight = 0.056, Rar = "Divine"},
-        ["Halloween Terrorbird"] = {Base = 160000, Weight = 24, Rar = "Mythic"},
-        ["Halloween Dunkleosteus"] = {Base = 450000000, Weight = 11, Rar = "Secret"},
-        ["Zombified Halloween Terrorbird"] = {Base = 1100000000, Weight = 24, Rar = "Secret"},
-        ["Zombified Halloween Gigantopithecus"] = {Base = 6000000000, Weight = 6.5, Rar = "Eternal"},
-        ["Candlefang"] = {Base = 225000, Weight = 19.62, Rar = "Mythic"},
-        ["Jesterpop"] = {Base = 40000, Weight = 34.39, Rar = "Legendary"},
-        ["Whiskers"] = {Base = 2000, Weight = 39.87, Rar = "Epic"},
-        ["Zombified Halloween Sabertooth"] = {Base = 14000000000, Weight = 0.5, Rar = "Divine"},
-        ["Halloween Sabertooth"] = {Base = 7500000000, Weight = 0.5, Rar = "Divine"},
-        ["Halloween Glyptodon"] = {Base = 35000, Weight = 39, Rar = "Legendary"},
-        ["Spirit Knight"] = {Base = 3000000, Weight = 4.55, Rar = "Cosmic"},
-        ["Zombified Halloween Megatherium"] = {Base = 1400000000, Weight = 18, Rar = "Secret"},
-        ["Halloween Megatherium"] = {Base = 6000000, Weight = 18, Rar = "Cosmic"},
+        ["Hexed Pumpkin"] = {Base = 150000000, Rar = "Cosmic"},
+        ["Graveyard Brute"] = {Base = 75000000, Rar = "Secret"},
+        ["Toadstool"] = {Base = 1600000, Rar = "Mythic"},
+        ["Haunted Scorpio"] = {Base = 30000000, Rar = "Cosmic"},
+        ["Crowshade"] = {Base = 4500000, Rar = "Mythic"},
+        ["Shelltide Voyager"] = {Base = 1600000000, Rar = "Eternal"},
+        ["Halloween Gigantopithecus"] = {Base = 1500000000, Rar = "Eternal"},
+        ["Werewolf"] = {Base = 1300000000, Rar = "Secret"},
+        ["Mimic Chest"] = {Base = 600000, Rar = "Legendary"},
+        ["Zombified Halloween Glyptodon"] = {Base = 800000000, Rar = "Secret"},
+        ["Zombified Halloween Dunkleosteus"] = {Base = 4000000000, Rar = "Eternal"},
+        ["BloodBloom"] = {Base = 450000000, Rar = "Secret"},
+        ["Hooded Gerbil"] = {Base = 300000, Rar = "Legendary"},
+        ["Ghost Reaper"] = {Base = 300000000, Rar = "Eternal"},
+        ["Abomination Kong"] = {Base = 3500000000, Rar = "Eternal"},
+        ["Patchwork Imp"] = {Base = 20000000, Rar = "Cosmic"},
+        ["Voidseer Pumpkin"] = {Base = 14000000000, Rar = "Divine"},
+        ["Halloween Terrorbird"] = {Base = 160000, Rar = "Mythic"},
+        ["Halloween Dunkleosteus"] = {Base = 450000000, Rar = "Secret"},
+        ["Zombified Halloween Terrorbird"] = {Base = 1100000000, Rar = "Secret"},
+        ["Zombified Halloween Gigantopithecus"] = {Base = 6000000000, Rar = "Eternal"},
+        ["Candlefang"] = {Base = 225000, Rar = "Mythic"},
+        ["Jesterpop"] = {Base = 40000, Rar = "Legendary"},
+        ["Whiskers"] = {Base = 2000, Rar = "Epic"},
+        ["Zombified Halloween Sabertooth"] = {Base = 14000000000, Rar = "Divine"},
+        ["Halloween Sabertooth"] = {Base = 7500000000, Rar = "Divine"},
+        ["Halloween Glyptodon"] = {Base = 35000, Rar = "Legendary"},
+        ["Spirit Knight"] = {Base = 3000000, Rar = "Cosmic"},
+        ["Zombified Halloween Megatherium"] = {Base = 1400000000, Rar = "Secret"},
+        ["Halloween Megatherium"] = {Base = 6000000, Rar = "Cosmic"},
     }
 
     -- 🔄 DICIONÁRIO DE SINÓNIMOS (ALIASES) 🔄
-    -- Faz a ponte entre o nome bugado que aparece no mapa e o nome real da Database
     local EggAliases = {
         ["Royal Mimic Egg"] = "Mimic Chest",
         ["Royal Mimic"] = "Mimic Chest",
-        ["Halloween Egg"] = "Hooded Gerbil",
-        ["HalloweenEgg"] = "Hooded Gerbil",-- Altere para o correspondente correto, se necessário
-        -- Exemplo: ["Nome Errado no ESP"] = "Nome Correto na Database",
+        ["Rotshroom Egg"] = "Rotshroom",
     }
 
     while task.wait(1.5) do
         pcall(function()
-            local act, total = 0, 0
-            if os.clock() - lastReset >= 10 then b = 0; lastReset = os.clock() end
+            local act = 0
+            local total = 0
             
-            local allUids, pModels, records = {}, {}, {}
+            if os.clock() - lastReset >= 10 then
+                b = 0
+                lastReset = os.clock()
+            end
+            
+            local allUids = {}
+            local pModels = {}
             
             local function scanFolder(folder)
                 if not folder then return end
                 for _, v in ipairs(folder:GetChildren()) do
-                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("HalloweenEggUid") or v:GetAttribute("Id")
+                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v:GetAttribute("HalloweenEggUid") or v:GetAttribute("Id")
                     if not uidAttr and v.Name ~= "Model" and v.Name ~= "Part" then uidAttr = v.Name end
+                    
                     if uidAttr then 
                         local uidStr = tostring(uidAttr)
-                        pModels[uidStr] = v; allUids[uidStr] = true 
+                        pModels[uidStr] = v 
+                        allUids[uidStr] = true
                     end
                 end
             end
             
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
             scanFolder(r:FindFirstChild("__DEBRIS"))
-            for _, folder in ipairs(r:GetChildren()) do
-                if folder:IsA("Folder") and string.find(string.lower(folder.Name), "eggslots") then scanFolder(folder) end
-            end
-            local hwDimension = r:FindFirstChild("HalloweenDimension")
-            if hwDimension and hwDimension:FindFirstChild("WorldEggs") then scanFolder(hwDimension.WorldEggs) end
             
+            for _, folder in ipairs(r:GetChildren()) do
+                if folder:IsA("Folder") and string.find(string.lower(folder.Name), "eggslots") and folder.Name ~= "AreaEggSlotsClient" then
+                    scanFolder(folder)
+                end
+            end
+
+            local hwDimension = r:FindFirstChild("HalloweenDimension")
+            if hwDimension then
+                local worldEggs = hwDimension:FindFirstChild("WorldEggs")
+                if worldEggs then
+                    scanFolder(worldEggs)
+                end
+            end
+            
+            local records = {}
             if s then
-                local st, fd = pcall(s.ReadFieldEggs)
-                if not st then st, fd = pcall(s.SyncFieldEggs) end
+                local st, fd = false, nil
+                if s.ReadFieldEggs then st, fd = pcall(s.ReadFieldEggs)
+                elseif s.SyncFieldEggs then st, fd = pcall(s.SyncFieldEggs) end
+                
                 if st and type(fd) == "table" then
-                    for k, rec in pairs(fd.Records or fd) do
-                        if type(rec) == "table" then
-                            local u = tostring(rec.Uid or rec.HalloweenEggUid or rec.Id or k)
-                            records[u] = rec; allUids[u] = true 
+                    local rawRec = fd.Records or fd
+                    if type(rawRec) == "table" then
+                        for k, rec in pairs(rawRec) do
+                            if type(rec) == "table" then
+                                local u = tostring(rec.Uid or rec.HalloweenEggUid or rec.Id or k)
+                                records[u] = rec
+                                allUids[u] = true 
+                            end
                         end
                     end
                 end
@@ -436,10 +635,11 @@ task.spawn(function()
             for u in pairs(allUids) do
                 local rawModel = pModels[u]
                 local rec = records[u] or {}
+                
                 total = total + 1
                 
                 if not cachedEggs[u] then
-                    local rawCat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.Category or rec.AssetCategory or rec.ItemName or "Egg"
+                    local rawCat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.AssetCategory or rec.Category or rec.ItemName or "Egg"
                     local rawDisplayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or rawCat
                     
                     if rawDisplayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" then 
@@ -448,13 +648,13 @@ task.spawn(function()
                         end
                     end
                     
-                    -- APLICA A TRADUÇÃO DO DICIONÁRIO DE SINÓNIMOS
+                    -- APLICA OS ALIASES DE NOME
                     local cat = EggAliases[rawCat] or rawCat
                     local displayCat = EggAliases[rawDisplayCat] or rawDisplayCat
                     local rName = rawModel and (EggAliases[rawModel.Name] or rawModel.Name)
                     
-                    local area = (rawModel and rawModel:GetAttribute("Zone")) or rec.Zone or "Unknown"
-                    
+                    local area = (rawModel and (rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rawModel:GetAttribute("Zone"))) or rec.AreaId or rec.Zone or "Unknown"
+
                     local scale = tonumber((rawModel and (rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))) or rec.Scale or rec.AssetScale)
                     if not scale and rawModel and rawModel:IsA("Model") then
                         pcall(function() scale = rawModel:GetScale() end)
@@ -467,34 +667,31 @@ task.spawn(function()
                         end
                     end
                     scale = tonumber(scale) or 1
+                    
                     local mAttr = (rawModel and (rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation"))) or rec.Mutations or rec.Mutation
                     
-                    local real, base, basePeso = 0, 0, nil
+                    local real, base = 0, 0
                     local rarity = "Unknown"
                     
-                    -- 🚀 INTERVENÇÃO SUPREMA COM ALIASES APLICADOS 🚀
+                    -- 🚀 VERIFICAÇÃO NA BASE DE DADOS SUPREMA DE HALLOWEEN 🚀
                     local hwData = HalloweenDB[displayCat] or HalloweenDB[cat] or (rName and HalloweenDB[rName])
                     
                     if hwData then
                         base = hwData.Base
-                        basePeso = hwData.Weight
                         rarity = hwData.Rar
                     else
-                        basePeso = tonumber((rawModel and (rawModel:GetAttribute("Weight") or rawModel:GetAttribute("ModelWeight"))) or rec.Weight or rec.ModelWeight)
+                        -- Busca nos módulos normais do jogo (Ovos Clássicos)
                         local tryNames = {displayCat, cat, rName}
                         for _, n in ipairs(tryNames) do
                             if not n or base > 0 then continue end
                             if hwPets and hwPets.Specs and hwPets.Specs[n] then
                                 base = tonumber(hwPets.Specs[n].EarningRate) or 0
-                                if not basePeso then basePeso = tonumber(hwPets.Specs[n].Weight or hwPets.Specs[n].ModelWeight) end
                             end
                             if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
                                 base = tonumber(assetsMod.Directory[n].EarningRate) or 0
-                                if not basePeso then basePeso = tonumber(assetsMod.Directory[n].ModelWeight) end
                             end
                             if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
                                 base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
-                                if not basePeso then basePeso = tonumber(pUtil.Assets.Directory[n].ModelWeight) end
                             end
                             if base == 0 and pUtil and pUtil.Assets and pUtil.Assets[n] then
                                 base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
@@ -505,11 +702,13 @@ task.spawn(function()
                             base = tonumber((rawModel and (rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))) or rec.Income or rec.EarningRate or rec.MoneyPerSecond) or 0
                             if base == 0 and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income) or 0 end
                         end
-                        rarity = (hwPets and hwPets.Specs and hwPets.Specs[displayCat]) and hwPets.Specs[displayCat].Rarity or "Unknown"
+                        
+                        rarity = getEggRarity(displayCat, rawModel, rec)
                     end
                     
                     base = (base == 0) and 1 or base
                     
+                    -- Matemática de Escala e Mutações
                     local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
                     local mutMult = 1
                     if mutModule and mAttr then
@@ -525,6 +724,7 @@ task.spawn(function()
                     
                     real = math.floor((base * scaleMult * mutMult) + 0.5)
 
+                    -- Fallback para cálculo nativo se necessário
                     if not hwData and AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
                         local nativeReal = 0
                         pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
@@ -534,10 +734,11 @@ task.spawn(function()
                         if nativeReal > real then real = nativeReal end
                     end
                     
-                    local pesoFinal = basePeso and (basePeso * scale) or nil
-                    local pesoStr = pesoFinal and string.format("%.1f Kg", pesoFinal) or string.format("%.1fx", scale)
+                    -- 🔴 FORMATO DE PESO/ESCALA FIXO EM "X" (Ex: 1.0x) CONFORME SOLICITADO
+                    local pesoStr = string.format("%.1fx", scale)
+                    local checkSize = scale
                     
-                    cachedEggs[u] = {C=displayCat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=(pesoFinal or scale)}
+                    cachedEggs[u] = {C=displayCat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
                 end
                 
                 local cData = cachedEggs[u]
@@ -548,10 +749,19 @@ task.spawn(function()
                 
                 if isValid then
                     act = act + 1
-                    if not X[u] then X[u] = true Wk(d) end
+                    if not X[u] then
+                        X[u] = true
+                        Wk(d) 
+                    end
                 end
                 
-                if rawModel then Dk(u, rawModel, d, isValid) end
+                if rawModel then
+                    local pModel = rawModel
+                    if pModel:IsA("Folder") then
+                        pModel = pModel:FindFirstChildWhichIsA("BasePart") or pModel:FindFirstChildWhichIsA("Model") or pModel
+                    end
+                    Dk(u, pModel, d, isValid)
+                end
             end
             
             if act > 0 then
@@ -561,16 +771,26 @@ task.spawn(function()
             end
             
             if stat then 
-                if h.AH and act == 0 then stat.Text = string.format("Status: Hop em %ds...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", math.max(0, math.floor(h.AHT - (os.clock() - lastValidEggTime))), total, act, formatNumber(b))
-                else stat.Text = string.format("Status: Scanning...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", total, act, formatNumber(b)) end
+                if h.AH and act == 0 then
+                    local tempoRestante = math.max(0, math.floor(h.AHT - (os.clock() - lastValidEggTime)))
+                    stat.Text = string.format("Status: Hop em %ds...\nOvos no Mapa: %d\nValidos: %d | Melhor: $%s/s", tempoRestante, total, act, formatNumber(b))
+                else
+                    stat.Text = string.format("Status: Scanning...\nOvos no Mapa: %d\nValidos (Alvos): %d | Melhor: $%s/s", total, act, formatNumber(b)) 
+                end
             end
             
             for k, v in pairs(Z) do
                 if not allUids[k] or not v.M or not v.M.Parent then
-                    if v.B then pcall(function() v.B:Destroy() end) end Z[k] = nil
+                    if v.B then pcall(function() v.B:Destroy() end) end
+                    Z[k] = nil
                 end
             end
-            for k in pairs(cachedEggs) do if not allUids[k] then cachedEggs[k] = nil end end
+            for k in pairs(cachedEggs) do
+                if not allUids[k] then
+                    cachedEggs[k] = nil
+                end
+            end
+            
         end)
     end
 end)
