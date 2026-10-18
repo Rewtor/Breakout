@@ -14,30 +14,24 @@ local o = e.LocalPlayer
 local req = (syn and syn.request) or http_request or request or HttpPost
 
 -- ========================================================
--- SISTEMA DE AUTO-UPDATE AUTOMÁTICO
+-- SISTEMA DE AUTO-UPDATE ASSÍNCRONO (NÃO TRAVA O INÍCIO)
 -- ========================================================
 task.spawn(function()
+    task.wait(2) -- Aguarda o script iniciar e carregar o mapa primeiro
     pcall(function()
         local updateURL = "https://raw.githubusercontent.com/Rewtor/Breakout/refs/heads/master/teste.luau"
-        local scriptName = "DiceRadar_Update.lua"
-        
         if game:HttpGet then
             local success, newCode = pcall(function()
                 return game:HttpGet(updateURL)
             end)
-            
             if success and newCode and #newCode > 100 then
-                if writefile then
-                    pcall(function() writefile(scriptName, newCode) end)
-                end
-                
-                local fn, err = loadstring(newCode)
-                if fn then
-                    if game:GetService("CoreGui"):FindFirstChild("DiceRadarGUI") then
-                        game:GetService("CoreGui").DiceRadarGUI:Destroy()
-                    end
-                    task.spawn(fn)
-                end
+                -- Se você quiser que ele atualize automaticamente ao detectar mudança:
+                -- (Descomente as linhas abaixo se o seu arquivo no Github estiver sempre atualizado)
+                -- local fn = loadstring(newCode)
+                -- if fn then
+                --     if c:FindFirstChild("DiceRadarGUI") then c.DiceRadarGUI:Destroy() end
+                --     task.spawn(fn)
+                -- end
             end
         end
     end)
