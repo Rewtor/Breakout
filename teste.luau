@@ -397,19 +397,25 @@ if not hPets then pcall(function() hPets = require(j.Shared.Modules.HalloweenPet
 local newAssets = nil pcall(function() newAssets = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Assets", 5)) end)
 if not newAssets then pcall(function() newAssets = require(j.Shared.Modules.Assets) end) end
 
--- NOVO: Dicionário de tradução (Ex: "Rotshroom" -> "Toadstool")
+-- NOVO: Dicionário de tradução inteligente
 local nameTranslation = {}
 pcall(function()
-    local function mapSources(moduleRef)
-        if moduleRef and moduleRef.Specs then
-            for realName, data in pairs(moduleRef.Specs) do
-                if data.Source then nameTranslation[data.Source] = realName end
-                if data.EggSource then nameTranslation[data.EggSource] = realName end
-            end
+    -- Mapeia os pets de Halloween
+    if hPets and hPets.Specs then
+        for realName, data in pairs(hPets.Specs) do
+            if data.Source then nameTranslation[data.Source] = realName end
+            if data.EggSource then nameTranslation[data.EggSource] = realName end
+            if data.EggModel then nameTranslation[data.EggModel] = realName end
         end
     end
-    mapSources(hPets)
-    mapSources(newAssets)
+    -- Mapeia os Assets gerais (agora usando .Directory)
+    if newAssets and newAssets.Directory then
+        for realName, data in pairs(newAssets.Directory) do
+            if data.Source then nameTranslation[data.Source] = realName end
+            if data.EggSource then nameTranslation[data.EggSource] = realName end
+            if data.EggModel then nameTranslation[data.EggModel] = realName end
+        end
+    end
 end)
 
 local function formatNumber(n)
@@ -449,22 +455,9 @@ local function getEggRarity(cat, rawModel, rec)
 
     end
 
-    if rar == "Unknown" then
-        pcall(function()
-            -- Busca no sistema antigo
-            if pUtil and pUtil.Assets and pUtil.Assets[cat] then
-                local ast = pUtil.Assets[cat]
-                local rData = ast.Rarity or (ast.Egg and ast.Egg.Rarity)
-                if type(rData) == "table" then 
-                    rar = rData.DisplayName or rData.Name or rData._id or "Unknown"
-                elseif type(rData) == "string" then 
-                    rar = rData 
-                end
-            end
-            
-            -- NOVO: Busca nos módulos novos (Halloween e Assets)
+-- NOVO: Busca nos módulos novos (Halloween e Assets)
             if rar == "Unknown" then
-                local ast = (hPets and hPets.Specs and hPets.Specs[cat]) or (newAssets and newAssets.Specs and newAssets.Specs[cat])
+                local ast = (hPets and hPets.Specs and hPets.Specs[cat]) or (newAssets and newAssets.Directory and newAssets.Directory[cat])
                 if ast then
                     local rData = ast.Rarity or (ast.Egg and ast.Egg.Rarity)
                     if type(rData) == "table" then 
@@ -474,8 +467,6 @@ local function getEggRarity(cat, rawModel, rec)
                     end
                 end
             end
-        end)
-    end
 
     rar = tostring(rar)
 
@@ -839,23 +830,13 @@ task.spawn(function()
 
                         
 
-                        if not base or base == 0 then
-                            pcall(function()
-                                if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) end
-                                if (not base or base == 0) and pUtil and pUtil.Assets and pUtil.Assets[cat] then
-                                    local ast = pUtil.Assets[cat]
-                                    base = tonumber(ast.EarningRate or (ast.Egg and ast.Egg.EarningRate))
-                                end
-                                
-                                -- NOVO: Busca renda base no HalloweenPets ou novos Assets
+                        -- NOVO: Busca renda base no HalloweenPets ou novos Assets
                                 if not base or base == 0 then
-                                    local ast = (hPets and hPets.Specs and hPets.Specs[cat]) or (newAssets and newAssets.Specs and newAssets.Specs[cat])
+                                    local ast = (hPets and hPets.Specs and hPets.Specs[cat]) or (newAssets and newAssets.Directory and newAssets.Directory[cat])
                                     if ast then
                                         base = tonumber(ast.EarningRate or ast.Income or ast.MoneyPerSecond)
                                     end
                                 end
-                            end)
-                        end
 
                         base = base or 0
 
