@@ -376,49 +376,49 @@ addBtn("Server Hop (Servidor Vazio)", doServerHop)
 
 
 -- ========================================================
-
 -- 5. CARREGAMENTO DOS MÓDULOS INTERNOS DO JOGO
-
 -- ========================================================
-
 local s = nil pcall(function() s = require(j:WaitForChild("Client", 5):WaitForChild("EggState", 5)) end)
-
 if not s then pcall(function() s = require(j.Client.EggState) end) end
 
-
-
 local pUtil = nil pcall(function() pUtil = require(j:WaitForChild("Shared", 5):WaitForChild("Util", 5):WaitForChild("AssetItems", 5)) end)
-
 if not pUtil then pcall(function() pUtil = require(j.Shared.Util.AssetItems) end) end
 
-
-
 local AssetEarnings = nil pcall(function() AssetEarnings = require(j:WaitForChild("Shared", 5):WaitForChild("Util", 5):WaitForChild("AssetEarnings", 5)) end)
-
 if not AssetEarnings then pcall(function() AssetEarnings = require(j.Shared.Util.AssetEarnings) end) end
 
-
-
 local mutModule = nil pcall(function() mutModule = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Mutations", 5)) end)
-
 if not mutModule then pcall(function() mutModule = require(j.Shared.Modules.Mutations) end) end
 
+-- NOVO: Importando os módulos de Halloween e novos Assets
+local hPets = nil pcall(function() hPets = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("HalloweenPets", 5)) end)
+if not hPets then pcall(function() hPets = require(j.Shared.Modules.HalloweenPets) end) end
 
+local newAssets = nil pcall(function() newAssets = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Assets", 5)) end)
+if not newAssets then pcall(function() newAssets = require(j.Shared.Modules.Assets) end) end
+
+-- NOVO: Dicionário de tradução (Ex: "Rotshroom" -> "Toadstool")
+local nameTranslation = {}
+pcall(function()
+    local function mapSources(moduleRef)
+        if moduleRef and moduleRef.Specs then
+            for realName, data in pairs(moduleRef.Specs) do
+                if data.Source then nameTranslation[data.Source] = realName end
+                if data.EggSource then nameTranslation[data.EggSource] = realName end
+            end
+        end
+    end
+    mapSources(hPets)
+    mapSources(newAssets)
+end)
 
 local function formatNumber(n)
-
     if n >= 1e12 then return string.format("%.2fT", n/1e12) end
-
     if n >= 1e9 then return string.format("%.2fB", n/1e9) end
-
     if n >= 1e6 then return string.format("%.2fM", n/1e6) end
-
     if n >= 1e3 then return string.format("%.1fk", n/1e3) end
-
     return tostring(math.floor(n))
-
 end
-
 
 
 -- ========================================================
@@ -450,29 +450,31 @@ local function getEggRarity(cat, rawModel, rec)
     end
 
     if rar == "Unknown" then
-
         pcall(function()
-
+            -- Busca no sistema antigo
             if pUtil and pUtil.Assets and pUtil.Assets[cat] then
-
                 local ast = pUtil.Assets[cat]
-
                 local rData = ast.Rarity or (ast.Egg and ast.Egg.Rarity)
-
                 if type(rData) == "table" then 
-
                     rar = rData.DisplayName or rData.Name or rData._id or "Unknown"
-
                 elseif type(rData) == "string" then 
-
                     rar = rData 
-
                 end
-
             end
-
+            
+            -- NOVO: Busca nos módulos novos (Halloween e Assets)
+            if rar == "Unknown" then
+                local ast = (hPets and hPets.Specs and hPets.Specs[cat]) or (newAssets and newAssets.Specs and newAssets.Specs[cat])
+                if ast then
+                    local rData = ast.Rarity or (ast.Egg and ast.Egg.Rarity)
+                    if type(rData) == "table" then 
+                        rar = rData.DisplayName or rData.Name or rData._id or "Unknown"
+                    elseif type(rData) == "string" then 
+                        rar = rData 
+                    end
+                end
+            end
         end)
-
     end
 
     rar = tostring(rar)
@@ -775,6 +777,11 @@ task.spawn(function()
                     local rec = records[u] or {}
 
                     local cat = rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rec.AssetCategory or rec.Category or "Egg"
+                    
+                    -- CORREÇÃO: Aplica a tradução (Muda "Rotshroom" para "Toadstool")
+                    if nameTranslation[cat] then
+                        cat = nameTranslation[cat]
+                    end
 
                     local area = rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rec.AreaId or "Unknown"
 
@@ -833,21 +840,21 @@ task.spawn(function()
                         
 
                         if not base or base == 0 then
-
                             pcall(function()
-
                                 if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) end
-
                                 if (not base or base == 0) and pUtil and pUtil.Assets and pUtil.Assets[cat] then
-
                                     local ast = pUtil.Assets[cat]
-
                                     base = tonumber(ast.EarningRate or (ast.Egg and ast.Egg.EarningRate))
-
                                 end
-
+                                
+                                -- NOVO: Busca renda base no HalloweenPets ou novos Assets
+                                if not base or base == 0 then
+                                    local ast = (hPets and hPets.Specs and hPets.Specs[cat]) or (newAssets and newAssets.Specs and newAssets.Specs[cat])
+                                    if ast then
+                                        base = tonumber(ast.EarningRate or ast.Income or ast.MoneyPerSecond)
+                                    end
+                                end
                             end)
-
                         end
 
                         base = base or 0
