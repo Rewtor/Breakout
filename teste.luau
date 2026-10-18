@@ -229,7 +229,7 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook (V13)", function()
+addBtn("Testar Webhook (V14)", function()
     if h.W == "" or not req then return end
     
     local playerName = o.Name
@@ -526,6 +526,40 @@ end
 -- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Definitivo V13)
 -- ========================================================
 task.spawn(function()
+    
+    -- 🎃 BASE DE DADOS SUPREMA DE HALLOWEEN 🎃
+    local HalloweenDB = {
+        ["Hexed Pumpkin"] = {Base = 150000000, Rar = "Cosmic"},
+        ["Graveyard Brute"] = {Base = 75000000, Rar = "Secret"},
+        ["Toadstool"] = {Base = 1600000, Rar = "Mythic"},
+        ["Haunted Scorpio"] = {Base = 30000000, Rar = "Cosmic"},
+        ["Crowshade"] = {Base = 4500000, Rar = "Mythic"},
+        ["Shelltide Voyager"] = {Base = 1600000000, Rar = "Eternal"},
+        ["Halloween Gigantopithecus"] = {Base = 1500000000, Rar = "Eternal"},
+        ["Werewolf"] = {Base = 1300000000, Rar = "Secret"},
+        ["Mimic Chest"] = {Base = 600000, Rar = "Legendary"},
+        ["Zombified Halloween Glyptodon"] = {Base = 800000000, Rar = "Secret"},
+        ["Zombified Halloween Dunkleosteus"] = {Base = 4000000000, Rar = "Eternal"},
+        ["BloodBloom"] = {Base = 450000000, Rar = "Secret"},
+        ["Hooded Gerbil"] = {Base = 300000, Rar = "Legendary"},
+        ["Ghost Reaper"] = {Base = 300000000, Rar = "Eternal"},
+        ["Abomination Kong"] = {Base = 3500000000, Rar = "Eternal"},
+        ["Patchwork Imp"] = {Base = 20000000, Rar = "Cosmic"},
+        ["Voidseer Pumpkin"] = {Base = 14000000000, Rar = "Divine"},
+        ["Halloween Terrorbird"] = {Base = 160000, Rar = "Mythic"},
+        ["Halloween Dunkleosteus"] = {Base = 450000000, Rar = "Secret"},
+        ["Zombified Halloween Terrorbird"] = {Base = 1100000000, Rar = "Secret"},
+        ["Zombified Halloween Gigantopithecus"] = {Base = 6000000000, Rar = "Eternal"},
+        ["Candlefang"] = {Base = 225000, Rar = "Mythic"},
+        ["Jesterpop"] = {Base = 40000, Rar = "Legendary"},
+        ["Whiskers"] = {Base = 2000, Rar = "Epic"},
+        ["Zombified Halloween Sabertooth"] = {Base = 14000000000, Rar = "Divine"},
+        ["Halloween Sabertooth"] = {Base = 7500000000, Rar = "Divine"},
+        ["Halloween Glyptodon"] = {Base = 35000, Rar = "Legendary"},
+        ["Spirit Knight"] = {Base = 3000000, Rar = "Cosmic"},
+        ["Zombified Halloween Megatherium"] = {Base = 1400000000, Rar = "Secret"},
+        ["Halloween Megatherium"] = {Base = 6000000, Rar = "Cosmic"},
+    }
 
     -- 🔄 DICIONÁRIO DE SINÓNIMOS (ALIASES) COMPLETO 🔄
     local EggAliases = {
