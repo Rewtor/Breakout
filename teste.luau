@@ -1,5 +1,5 @@
 -- ========================================================
--- RADAR V15 (EXACT BASE EARNINGS PATCH - NO SCALE ESTIMATE)
+-- RADAR V16 (OFFICIAL BASE + REAL SCALE MULTIPLIER)
 -- ========================================================
 local e = game:GetService("Players")
 local r = game:GetService("Workspace")
@@ -520,7 +520,7 @@ local function Dk(u, m, d, isValid)
 end
 
 -- ========================================================
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Dinâmico V15 - Exato)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Dinâmico V16)
 -- ========================================================
 task.spawn(function()
     
@@ -638,7 +638,7 @@ task.spawn(function()
                     local base = 0
                     local rarity = "Unknown"
                     
-                    -- 🎯 PUXA DIRETAMENTE A TAXA BASE NATIVA DOS MÓDULOS (SEM ESTIMATIVA DE ESCALA)
+                    -- Puxa a taxa base real do arquivo oficial do jogo
                     local tryNames = {displayCat, cat, rName}
                     for _, n in ipairs(tryNames) do
                         if not n or base > 0 then continue end
@@ -664,9 +664,10 @@ task.spawn(function()
                     rarity = getEggRarity(displayCat, rawModel, rec)
                     base = (base == 0) and 1 or base
                     
-                    -- Define o valor exato oficial sem aplicação de fórmulas customizadas
-                    local real = base
-                    
+                    -- Aplica o multiplicador de escala real sobre a base oficial do jogo
+                    local scaleMult = scale > 0 and scale or 1
+                    local real = math.floor((base * scaleMult) + 0.5)
+
                     if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
                         local nativeReal = 0
                         pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Scale = scale})) or 0 end)
