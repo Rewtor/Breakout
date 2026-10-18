@@ -18,8 +18,7 @@ local req = (syn and syn.request) or http_request or request or HttpPost
 -- ========================================================
 task.spawn(function()
     pcall(function()
-        -- Substitua o link abaixo pelo link RAW oficial do seu script atualizado (GitHub, Pastebin, etc.)
-        local updateURL = "https://raw.githubusercontent.com/Rewtor/Breakout/refs/heads/master/teste.luau" 
+        local updateURL = "https://raw.githubusercontent.com/Rewtor/Breakout/refs/heads/master/teste.luau"
         local scriptName = "DiceRadar_Update.lua"
         
         if game:HttpGet then
@@ -28,15 +27,12 @@ task.spawn(function()
             end)
             
             if success and newCode and #newCode > 100 then
-                -- Opcional: Salva o arquivo localmente se o executor suportar
                 if writefile then
                     pcall(function() writefile(scriptName, newCode) end)
                 end
                 
-                -- Executa o código novo imediatamente na memória
                 local fn, err = loadstring(newCode)
                 if fn then
-                    -- Destrói a interface antiga antes de carregar a nova para evitar duplicação
                     if game:GetService("CoreGui"):FindFirstChild("DiceRadarGUI") then
                         game:GetService("CoreGui").DiceRadarGUI:Destroy()
                     end
@@ -521,7 +517,6 @@ end
 -- ========================================================
 task.spawn(function()
     
-    -- Dicionário para traduzir os nomes alternativos do mapa para os nomes oficiais dos arquivos
     local EggAliases = {
         ["Rotshroom"] = "Toadstool",
         ["Rotshroom Egg"] = "Toadstool",
@@ -587,7 +582,6 @@ task.spawn(function()
                     local rec = records[u] or {}
                     local rawCat = rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rec.AssetCategory or rec.Category or "Egg"
                     
-                    -- Aplica o dicionário de sinônimos para normalizar os nomes
                     local cat = EggAliases[rawCat] or rawCat
                     
                     local area = rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rec.AreaId or "Unknown"
