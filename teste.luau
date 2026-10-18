@@ -345,12 +345,11 @@ local function Dk(u, m, d, isValid)
 end
 
 -- ========================================================
--- 7. MOTOR DE VARREDURA PRINCIPAL (V10 - DATABASE ABSOLUTA)
+-- 7. MOTOR DE VARREDURA PRINCIPAL (V11 - DATABASE + ALIASES)
 -- ========================================================
 task.spawn(function()
     
     -- 🎃 BASE DE DADOS SUPREMA DE HALLOWEEN 🎃
-    -- Ignora qualquer erro do jogo e força os valores reais exatos!
     local HalloweenDB = {
         ["Hexed Pumpkin"] = {Base = 150000000, Weight = 18.32, Rar = "Cosmic"},
         ["Graveyard Brute"] = {Base = 75000000, Weight = 1.24, Rar = "Secret"},
@@ -382,6 +381,16 @@ task.spawn(function()
         ["Spirit Knight"] = {Base = 3000000, Weight = 4.55, Rar = "Cosmic"},
         ["Zombified Halloween Megatherium"] = {Base = 1400000000, Weight = 18, Rar = "Secret"},
         ["Halloween Megatherium"] = {Base = 6000000, Weight = 18, Rar = "Cosmic"},
+    }
+
+    -- 🔄 DICIONÁRIO DE SINÓNIMOS (ALIASES) 🔄
+    -- Faz a ponte entre o nome bugado que aparece no mapa e o nome real da Database
+    local EggAliases = {
+        ["Royal Mimic Egg"] = "Mimic Chest",
+        ["Royal Mimic"] = "Mimic Chest",
+        ["Halloween Egg"] = "Hooded Gerbil",
+        ["HalloweenEgg"] = "Hooded Gerbil",-- Altere para o correspondente correto, se necessário
+        -- Exemplo: ["Nome Errado no ESP"] = "Nome Correto na Database",
     }
 
     while task.wait(1.5) do
@@ -430,14 +439,19 @@ task.spawn(function()
                 total = total + 1
                 
                 if not cachedEggs[u] then
-                    local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.Category or rec.AssetCategory or rec.ItemName or "Egg"
-                    local displayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or cat
+                    local rawCat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.Category or rec.AssetCategory or rec.ItemName or "Egg"
+                    local rawDisplayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or rawCat
                     
-                    if displayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" then 
+                    if rawDisplayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" then 
                         if string.len(rawModel.Name) < 30 and not string.find(rawModel.Name, "_") then
-                            displayCat = rawModel.Name 
+                            rawDisplayCat = rawModel.Name 
                         end
                     end
+                    
+                    -- APLICA A TRADUÇÃO DO DICIONÁRIO DE SINÓNIMOS
+                    local cat = EggAliases[rawCat] or rawCat
+                    local displayCat = EggAliases[rawDisplayCat] or rawDisplayCat
+                    local rName = rawModel and (EggAliases[rawModel.Name] or rawModel.Name)
                     
                     local area = (rawModel and rawModel:GetAttribute("Zone")) or rec.Zone or "Unknown"
                     
@@ -458,17 +472,16 @@ task.spawn(function()
                     local real, base, basePeso = 0, 0, nil
                     local rarity = "Unknown"
                     
-                    -- 🚀 INTERVENÇÃO SUPREMA: LÊ DA SUA BASE DE DADOS SE FOR UM OVO DE EVENTO 🚀
-                    local hwData = HalloweenDB[displayCat] or HalloweenDB[cat] or (rawModel and HalloweenDB[rawModel.Name])
+                    -- 🚀 INTERVENÇÃO SUPREMA COM ALIASES APLICADOS 🚀
+                    local hwData = HalloweenDB[displayCat] or HalloweenDB[cat] or (rName and HalloweenDB[rName])
                     
                     if hwData then
                         base = hwData.Base
                         basePeso = hwData.Weight
                         rarity = hwData.Rar
                     else
-                        -- Se não for de Halloween, usa a busca nativa para ovos normais
                         basePeso = tonumber((rawModel and (rawModel:GetAttribute("Weight") or rawModel:GetAttribute("ModelWeight"))) or rec.Weight or rec.ModelWeight)
-                        local tryNames = {displayCat, cat, rawModel and rawModel.Name}
+                        local tryNames = {displayCat, cat, rName}
                         for _, n in ipairs(tryNames) do
                             if not n or base > 0 then continue end
                             if hwPets and hwPets.Specs and hwPets.Specs[n] then
@@ -497,7 +510,6 @@ task.spawn(function()
                     
                     base = (base == 0) and 1 or base
                     
-                    -- Calcula o Multiplicador de Escala e Mutação
                     local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
                     local mutMult = 1
                     if mutModule and mAttr then
@@ -511,10 +523,8 @@ task.spawn(function()
                         mutMult = 1.5 
                     end
                     
-                    -- Preço Final Definitivo
                     real = math.floor((base * scaleMult * mutMult) + 0.5)
 
-                    -- Se NÃO for um ovo da nossa Database, testa se o motor nativo devolve um valor maior
                     if not hwData and AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
                         local nativeReal = 0
                         pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
