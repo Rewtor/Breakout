@@ -1,5 +1,5 @@
 -- ========================================================
--- RADAR V16 (OFFICIAL BASE + REAL SCALE MULTIPLIER)
+-- 1. IMPORTAÇÃO DOS SERVIÇOS DO ROBLOX
 -- ========================================================
 local e = game:GetService("Players")
 local r = game:GetService("Workspace")
@@ -37,7 +37,7 @@ h.PC = tonumber(h.PC) or 1
 
 local X = {} 
 local Z = {} 
-local cachedEggs = {}
+local cachedEggs = {} 
 local b = 0  
 local isHopping = false 
 local lastReset = os.clock()
@@ -229,52 +229,15 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook (V17)", function()
+addBtn("Testar Webhook", function()
     if h.W == "" or not req then return end
-    
-    local playerName = o.Name
-    local placeId = game.PlaceId
-    local jobId = game.JobId
-    local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(placeId) .. "&jobId=" .. tostring(jobId)
-
-    local eggList = {}
-    for u, d in pairs(cachedEggs) do
-        table.insert(eggList, d)
-    end
-    table.sort(eggList, function(a, b) return (a.R or 0) > (b.R or 0) end)
-    
-    local eggString = ""
-    local maxList = 15
-    for i, d in ipairs(eggList) do
-        if i > maxList then 
-            eggString = eggString .. string.format("\n*... e mais %d ovos escondidos*", #eggList - maxList)
-            break 
-        end
-        eggString = eggString .. string.format("• **%s** (%s) | $%s/s\n", d.C, d.P, formatNumber(d.R))
-    end
-    
-    if #eggList == 0 then
-        eggString = "Nenhum ovo carregado no mapa no momento."
-    end
-
     local m = ""
-    if h.P ~= "" then 
-        m = "Teste de Ping do Radar! <@"..h.P..">" 
-    else
-        m = "Teste de Ping do Radar!"
-    end
-    
+    if h.P ~= "" then m = "Teste de Ping! <@"..h.P..">" end
     local E = {{
         title = "✅ Conexão Estabelecida!",
-        description = "O Webhook do Dice Radar está configurado.\n\n**📋 Top Ovos no Mapa Atual:**\n" .. eggString,
-        url = joinLink,
-        color = 65352,
-        fields = {
-            {name = "👤 Conta Testando", value = "**" .. playerName .. "**", inline = true},
-            {name = "🔗 Servidor Atual", value = "[Clique para Join (Netlify)](" .. joinLink .. ")", inline = true},
-        }
+        description = "O Webhook do Dice Radar está a funcionar perfeitamente e pronto a detetar ovos.",
+        color = 65352
     }}
-    
     pcall(function()
         req({Url=h.W, Method="POST", Headers={["Content-Type"]="application/json"}, Body=a:JSONEncode({content=m, embeds=E})})
     end)
@@ -375,8 +338,8 @@ if not pUtil then pcall(function() pUtil = require(j.Shared.Util.AssetItems) end
 local AssetEarnings = nil pcall(function() AssetEarnings = require(j:WaitForChild("Shared", 5):WaitForChild("Util", 5):WaitForChild("AssetEarnings", 5)) end)
 if not AssetEarnings then pcall(function() AssetEarnings = require(j.Shared.Util.AssetEarnings) end) end
 
-local hwPets = nil pcall(function() hwPets = require(j:FindFirstChild("HalloweenPets", true)) end)
-local assetsMod = nil pcall(function() assetsMod = require(j:FindFirstChild("Assets", true)) end)
+local mutModule = nil pcall(function() mutModule = require(j:WaitForChild("Shared", 5):WaitForChild("Modules", 5):WaitForChild("Mutations", 5)) end)
+if not mutModule then pcall(function() mutModule = require(j.Shared.Modules.Mutations) end) end
 
 -- ========================================================
 -- 6. EXTRAÇÃO INTELIGENTE DE RARIDADE DOS OVOS
@@ -474,7 +437,7 @@ local function Wk(d)
             {name = "Raridade", value = d.Rar, inline = true},
             {name = "Tamanho", value = d.P, inline = true},
             {name = "Dinheiro/S", value = "$" .. formatNumber(d.R) .. "/s", inline = true},
-            {name = "🔗 Link de Join Automático", value = "[Abrir Servidor](" .. joinLink .. ")", inline = false},
+            {name = "🔗 Link de Join Automático", value = "[Abrir no seu site via Netlify](" .. joinLink .. ")", inline = false},
         }
     }}
     
@@ -520,10 +483,11 @@ local function Dk(u, m, d, isValid)
 end
 
 -- ========================================================
--- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Radar Dinâmico V16)
+-- 9. LOOP PRINCIPAL DE VARREDURA DO MAPA (Original + Aliases)
 -- ========================================================
 task.spawn(function()
     
+    -- Dicionário para traduzir os nomes alternativos do mapa para os nomes oficiais dos arquivos
     local EggAliases = {
         ["Rotshroom"] = "Toadstool",
         ["Rotshroom Egg"] = "Toadstool",
@@ -534,7 +498,6 @@ task.spawn(function()
         ["Frankenstein Kong Egg"] = "Abomination Kong",
         ["Quilted Imp Egg"] = "Patchwork Imp",
         ["SpiritKnight"] = "Spirit Knight",
-        ["HalloweenEgg"] = "Hooded Gerbil",
     }
 
     while task.wait(1.5) do
@@ -547,38 +510,21 @@ task.spawn(function()
                 lastReset = os.clock()
             end
             
-            local allUids = {}
             local pModels = {}
-            
             local function scanFolder(folder)
                 if not folder then return end
                 for _, v in ipairs(folder:GetChildren()) do
-                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v:GetAttribute("HalloweenEggUid") or v:GetAttribute("Id")
-                    if not uidAttr and v.Name ~= "Model" and v.Name ~= "Part" then uidAttr = v.Name end
-                    
-                    if uidAttr then 
-                        local uidStr = tostring(uidAttr)
-                        pModels[uidStr] = v 
-                        allUids[uidStr] = true
-                    end
+                    local uidAttr = v:GetAttribute("UID") or v:GetAttribute("Uid") or v:GetAttribute("EggUid") or v.Name
+                    if uidAttr then pModels[tostring(uidAttr)] = v end
                 end
             end
             
             scanFolder(r:FindFirstChild("AreaEggSlotsClient"))
             scanFolder(r:FindFirstChild("__DEBRIS"))
             
-            for _, folder in ipairs(r:GetChildren()) do
-                if folder:IsA("Folder") and string.find(string.lower(folder.Name), "eggslots") and folder.Name ~= "AreaEggSlotsClient" then
-                    scanFolder(folder)
-                end
-            end
-
             local hwDimension = r:FindFirstChild("HalloweenDimension")
-            if hwDimension then
-                local worldEggs = hwDimension:FindFirstChild("WorldEggs")
-                if worldEggs then
-                    scanFolder(worldEggs)
-                end
+            if hwDimension and hwDimension:FindFirstChild("WorldEggs") then
+                scanFolder(hwDimension.WorldEggs)
             end
             
             local records = {}
@@ -592,93 +538,86 @@ task.spawn(function()
                     if type(rawRec) == "table" then
                         for k, rec in pairs(rawRec) do
                             if type(rec) == "table" then
-                                local u = tostring(rec.Uid or rec.HalloweenEggUid or rec.Id or k)
+                                local u = tostring(rec.Uid or k)
                                 records[u] = rec
-                                allUids[u] = true 
                             end
                         end
                     end
                 end
             end
             
-            for u in pairs(allUids) do
-                local rawModel = pModels[u]
-                local rec = records[u] or {}
-                
+            for u, rawModel in pairs(pModels) do
                 total = total + 1
                 
                 if not cachedEggs[u] then
-                    local rawCat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.AssetCategory or rec.Category or rec.ItemName or "Egg"
-                    local rawDisplayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or rawCat
+                    local rec = records[u] or {}
+                    local rawCat = rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rec.AssetCategory or rec.Category or "Egg"
                     
-                    if rawDisplayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" then 
-                        if string.len(rawModel.Name) < 30 and not string.find(rawModel.Name, "_") then
-                            rawDisplayCat = rawModel.Name 
-                        end
+                    -- Aplica o dicionário de sinônimos para normalizar os nomes
+                    local cat = EggAliases[rawCat] or rawCat
+                    
+                    local area = rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rec.AreaId or "Unknown"
+                    local rarity = getEggRarity(cat, rawModel, rec)
+
+                    local scale = tonumber(rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))
+                    if not scale then scale = tonumber(rec.Scale or rec.AssetScale) end
+                    scale = scale or 1
+                    
+                    local peso = tonumber(rawModel:GetAttribute("Weight") or rawModel:GetAttribute("Kg") or rawModel:GetAttribute("ModelWeight"))
+                    if not peso then peso = tonumber(rec.Weight or rec.Kg or rec.ModelWeight) end
+                    
+                    local mAttr = rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation") or rec.Mutations or rec.Mutation
+                    
+                    local real = 0
+                    if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
+                        pcall(function()
+                            real = tonumber(AssetEarnings.MutationOnlyRatePerSecond({
+                                Category = cat,
+                                Mutations = mAttr,
+                                Scale = scale
+                            })) or 0
+                        end)
                     end
                     
-                    local cat = EggAliases[rawCat] or rawCat
-                    local displayCat = EggAliases[rawDisplayCat] or rawDisplayCat
-                    local rName = rawModel and (EggAliases[rawModel.Name] or rawModel.Name)
-                    
-                    local area = (rawModel and (rawModel:GetAttribute("AreaId") or rawModel:GetAttribute("Area") or rawModel:GetAttribute("Zone"))) or rec.AreaId or rec.Zone or "Unknown"
-
-                    local scale = tonumber((rawModel and (rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))) or rec.Scale or rec.AssetScale)
-                    if not scale and rawModel and rawModel:IsA("Model") then
-                        pcall(function() scale = rawModel:GetScale() end)
-                        if not scale or scale == 1 then
+                    if real == 0 then
+                        local base = tonumber(rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))
+                        if not base then base = tonumber(rec.Income or rec.EarningRate or rec.MoneyPerSecond) end
+                        if (not base or base == 0) and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond) end
+                        
+                        if not base or base == 0 then
                             pcall(function()
-                                local extents = rawModel:GetExtentsSize()
-                                local maxAxis = math.max(extents.X, extents.Y, extents.Z)
-                                if maxAxis > 5 then scale = maxAxis / 4.5 end
+                                if pUtil and pUtil.ProfileIncomePerSecond then base = tonumber(pUtil.ProfileIncomePerSecond(cat)) end
+                                if (not base or base == 0) and pUtil and pUtil.Assets and pUtil.Assets[cat] then
+                                    local ast = pUtil.Assets[cat]
+                                    base = tonumber(ast.EarningRate or (ast.Egg and ast.Egg.EarningRate))
+                                end
                             end)
                         end
-                    end
-                    scale = tonumber(scale) or 1
-                    
-                    local base = 0
-                    local rarity = "Unknown"
-                    
-                    -- Puxa a taxa base real do arquivo oficial do jogo
-                    local tryNames = {displayCat, cat, rName}
-                    for _, n in ipairs(tryNames) do
-                        if not n or base > 0 then continue end
-                        if hwPets and hwPets.Specs and hwPets.Specs[n] then
-                            base = tonumber(hwPets.Specs[n].EarningRate) or 0
+                        base = base or 0
+                        if base == 0 then base = 1 end
+                        
+                        local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
+                        local mutMult = 1
+                        if mutModule and mAttr then
+                            pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
+                        elseif type(mAttr) == "table" then
+                            for _, m in pairs(mAttr) do
+                                local val = (type(m) == "table" and tonumber(m.Multiplier or m.Value)) or tonumber(m) or 1.5
+                                mutMult = mutMult * val
+                            end
+                        elseif mAttr then 
+                            mutMult = 1.5 
                         end
-                        if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
-                            base = tonumber(assetsMod.Directory[n].EarningRate) or 0
-                        end
-                        if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
-                            base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
-                        end
-                        if base == 0 and pUtil and pUtil.Assets and pUtil.Assets[n] then
-                            base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
-                        end
+                        
+                        real = base * scaleMult * mutMult
+                        if real < 1 and base > 0 then real = 1 end
                     end
                     
-                    if base == 0 then
-                        base = tonumber((rawModel and (rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))) or rec.Income or rec.EarningRate or rec.MoneyPerSecond) or 0
-                        if base == 0 and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income) or 0 end
-                    end
+                    real = math.floor(real + 0.5)
+                    local pesoStr = peso and string.format("%.1f Kg", peso) or string.format("%.1fx", scale)
+                    local checkSize = peso or scale or 0
                     
-                    rarity = getEggRarity(displayCat, rawModel, rec)
-                    base = (base == 0) and 1 or base
-                    
-                    -- Aplica o multiplicador de escala real sobre a base oficial do jogo
-                    local scaleMult = scale > 0 and scale or 1
-                    local real = math.floor((base * scaleMult) + 0.5)
-
-                    if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
-                        local nativeReal = 0
-                        pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Scale = scale})) or 0 end)
-                        if nativeReal > real then real = nativeReal end
-                    end
-                    
-                    local pesoStr = string.format("%.1fx", scale)
-                    local checkSize = scale
-                    
-                    cachedEggs[u] = {C=displayCat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
+                    cachedEggs[u] = {C=cat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=checkSize}
                 end
                 
                 local cData = cachedEggs[u]
@@ -720,13 +659,13 @@ task.spawn(function()
             end
             
             for k, v in pairs(Z) do
-                if not allUids[k] or not v.M or not v.M.Parent then
+                if not pModels[k] or not v.M or not v.M.Parent then
                     if v.B then pcall(function() v.B:Destroy() end) end
                     Z[k] = nil
                 end
             end
             for k in pairs(cachedEggs) do
-                if not allUids[k] then
+                if not pModels[k] then
                     cachedEggs[k] = nil
                 end
             end
