@@ -215,7 +215,7 @@ local function formatNumber(n)
     return tostring(math.floor(n))
 end
 
-addBtn("Testar Webhook", function()
+addBtn("Testar Webhook V8", function()
     if h.W == "" or not req then return end
     local joinLink = "https://darling-liger-02e311.netlify.app/index.html?placeId=" .. tostring(game.PlaceId) .. "&jobId=" .. tostring(game.JobId)
 
@@ -345,9 +345,45 @@ local function Dk(u, m, d, isValid)
 end
 
 -- ========================================================
--- MOTOR DE VARREDURA PRINCIPAL (V8 DEFINITIVA)
+-- 7. MOTOR DE VARREDURA PRINCIPAL (V10 - DATABASE ABSOLUTA)
 -- ========================================================
 task.spawn(function()
+    
+    -- 🎃 BASE DE DADOS SUPREMA DE HALLOWEEN 🎃
+    -- Ignora qualquer erro do jogo e força os valores reais exatos!
+    local HalloweenDB = {
+        ["Hexed Pumpkin"] = {Base = 150000000, Weight = 18.32, Rar = "Cosmic"},
+        ["Graveyard Brute"] = {Base = 75000000, Weight = 1.24, Rar = "Secret"},
+        ["Toadstool"] = {Base = 1600000, Weight = 27.27, Rar = "Mythic"},
+        ["Haunted Scorpio"] = {Base = 30000000, Weight = 13.96, Rar = "Cosmic"},
+        ["Crowshade"] = {Base = 4500000, Weight = 37.51, Rar = "Mythic"},
+        ["Shelltide Voyager"] = {Base = 1600000000, Weight = 0.31, Rar = "Eternal"},
+        ["Halloween Gigantopithecus"] = {Base = 1500000000, Weight = 6.5, Rar = "Eternal"},
+        ["Werewolf"] = {Base = 1300000000, Weight = 0.74, Rar = "Secret"},
+        ["Mimic Chest"] = {Base = 600000, Weight = 43.1, Rar = "Legendary"},
+        ["Zombified Halloween Glyptodon"] = {Base = 800000000, Weight = 39, Rar = "Secret"},
+        ["Zombified Halloween Dunkleosteus"] = {Base = 4000000000, Weight = 11, Rar = "Eternal"},
+        ["BloodBloom"] = {Base = 450000000, Weight = 1.24, Rar = "Secret"},
+        ["Hooded Gerbil"] = {Base = 300000, Weight = 38.39, Rar = "Legendary"},
+        ["Ghost Reaper"] = {Base = 300000000, Weight = 0.31, Rar = "Eternal"},
+        ["Abomination Kong"] = {Base = 3500000000, Weight = 0.31, Rar = "Eternal"},
+        ["Patchwork Imp"] = {Base = 20000000, Weight = 18.83, Rar = "Cosmic"},
+        ["Voidseer Pumpkin"] = {Base = 14000000000, Weight = 0.056, Rar = "Divine"},
+        ["Halloween Terrorbird"] = {Base = 160000, Weight = 24, Rar = "Mythic"},
+        ["Halloween Dunkleosteus"] = {Base = 450000000, Weight = 11, Rar = "Secret"},
+        ["Zombified Halloween Terrorbird"] = {Base = 1100000000, Weight = 24, Rar = "Secret"},
+        ["Zombified Halloween Gigantopithecus"] = {Base = 6000000000, Weight = 6.5, Rar = "Eternal"},
+        ["Candlefang"] = {Base = 225000, Weight = 19.62, Rar = "Mythic"},
+        ["Jesterpop"] = {Base = 40000, Weight = 34.39, Rar = "Legendary"},
+        ["Whiskers"] = {Base = 2000, Weight = 39.87, Rar = "Epic"},
+        ["Zombified Halloween Sabertooth"] = {Base = 14000000000, Weight = 0.5, Rar = "Divine"},
+        ["Halloween Sabertooth"] = {Base = 7500000000, Weight = 0.5, Rar = "Divine"},
+        ["Halloween Glyptodon"] = {Base = 35000, Weight = 39, Rar = "Legendary"},
+        ["Spirit Knight"] = {Base = 3000000, Weight = 4.55, Rar = "Cosmic"},
+        ["Zombified Halloween Megatherium"] = {Base = 1400000000, Weight = 18, Rar = "Secret"},
+        ["Halloween Megatherium"] = {Base = 6000000, Weight = 18, Rar = "Cosmic"},
+    }
+
     while task.wait(1.5) do
         pcall(function()
             local act, total = 0, 0
@@ -397,7 +433,6 @@ task.spawn(function()
                     local cat = (rawModel and (rawModel:GetAttribute("Category") or rawModel:GetAttribute("AssetCategory") or rawModel:GetAttribute("ItemName"))) or rec.Category or rec.AssetCategory or rec.ItemName or "Egg"
                     local displayCat = (rawModel and (rawModel:GetAttribute("PreparedSourceName") or rawModel:GetAttribute("DisplayName"))) or rec.PreparedSourceName or rec.DisplayName or cat
                     
-                    -- FILTRO DE NOME LIMPO: Bloqueia hashes e links longos de aparecerem na tela
                     if displayCat == "Egg" and rawModel and rawModel.Name ~= "Model" and rawModel.Name ~= "Part" then 
                         if string.len(rawModel.Name) < 30 and not string.find(rawModel.Name, "_") then
                             displayCat = rawModel.Name 
@@ -406,7 +441,6 @@ task.spawn(function()
                     
                     local area = (rawModel and rawModel:GetAttribute("Zone")) or rec.Zone or "Unknown"
                     
-                    -- 🔴 MEDIÇÃO FÍSICA
                     local scale = tonumber((rawModel and (rawModel:GetAttribute("Scale") or rawModel:GetAttribute("AssetScale"))) or rec.Scale or rec.AssetScale)
                     if not scale and rawModel and rawModel:IsA("Model") then
                         pcall(function() scale = rawModel:GetScale() end)
@@ -419,43 +453,51 @@ task.spawn(function()
                         end
                     end
                     scale = tonumber(scale) or 1
-                    
-                    local basePeso = tonumber((rawModel and (rawModel:GetAttribute("Weight") or rawModel:GetAttribute("ModelWeight"))) or rec.Weight or rec.ModelWeight)
                     local mAttr = (rawModel and (rawModel:GetAttribute("Mutations") or rawModel:GetAttribute("Mutation"))) or rec.Mutations or rec.Mutation
                     
-                    local real, base = 0, 0
-                    local tryNames = {displayCat, cat, rawModel and rawModel.Name}
+                    local real, base, basePeso = 0, 0, nil
+                    local rarity = "Unknown"
                     
-                    -- VASCULHA TODOS OS MÓDULOS DE FORMA INTELIGENTE
-                    for _, n in ipairs(tryNames) do
-                        if not n or base > 0 then continue end
-                        -- Ovos de Evento (Halloween Pets)
-                        if hwPets and hwPets.Specs and hwPets.Specs[n] then
-                            base = tonumber(hwPets.Specs[n].EarningRate) or 0
-                            if not basePeso then basePeso = tonumber(hwPets.Specs[n].Weight or hwPets.Specs[n].ModelWeight) end
+                    -- 🚀 INTERVENÇÃO SUPREMA: LÊ DA SUA BASE DE DADOS SE FOR UM OVO DE EVENTO 🚀
+                    local hwData = HalloweenDB[displayCat] or HalloweenDB[cat] or (rawModel and HalloweenDB[rawModel.Name])
+                    
+                    if hwData then
+                        base = hwData.Base
+                        basePeso = hwData.Weight
+                        rarity = hwData.Rar
+                    else
+                        -- Se não for de Halloween, usa a busca nativa para ovos normais
+                        basePeso = tonumber((rawModel and (rawModel:GetAttribute("Weight") or rawModel:GetAttribute("ModelWeight"))) or rec.Weight or rec.ModelWeight)
+                        local tryNames = {displayCat, cat, rawModel and rawModel.Name}
+                        for _, n in ipairs(tryNames) do
+                            if not n or base > 0 then continue end
+                            if hwPets and hwPets.Specs and hwPets.Specs[n] then
+                                base = tonumber(hwPets.Specs[n].EarningRate) or 0
+                                if not basePeso then basePeso = tonumber(hwPets.Specs[n].Weight or hwPets.Specs[n].ModelWeight) end
+                            end
+                            if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
+                                base = tonumber(assetsMod.Directory[n].EarningRate) or 0
+                                if not basePeso then basePeso = tonumber(assetsMod.Directory[n].ModelWeight) end
+                            end
+                            if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
+                                base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
+                                if not basePeso then basePeso = tonumber(pUtil.Assets.Directory[n].ModelWeight) end
+                            end
+                            if base == 0 and pUtil and pUtil.Assets and pUtil.Assets[n] then
+                                base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
+                            end
                         end
-                        if base == 0 and assetsMod and assetsMod.Directory and assetsMod.Directory[n] then
-                            base = tonumber(assetsMod.Directory[n].EarningRate) or 0
-                            if not basePeso then basePeso = tonumber(assetsMod.Directory[n].ModelWeight) end
+                        
+                        if base == 0 then
+                            base = tonumber((rawModel and (rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))) or rec.Income or rec.EarningRate or rec.MoneyPerSecond) or 0
+                            if base == 0 and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income) or 0 end
                         end
-                        if base == 0 and pUtil and pUtil.Assets and pUtil.Assets.Directory and pUtil.Assets.Directory[n] then
-                            base = tonumber(pUtil.Assets.Directory[n].EarningRate) or 0
-                            if not basePeso then basePeso = tonumber(pUtil.Assets.Directory[n].ModelWeight) end
-                        end
-                        -- Ovos Clássicos (Resolve o problema dos Ovos Normais a $1)
-                        if base == 0 and pUtil and pUtil.Assets and pUtil.Assets[n] then
-                            base = tonumber(pUtil.Assets[n].EarningRate or (pUtil.Assets[n].Egg and pUtil.Assets[n].Egg.EarningRate)) or 0
-                        end
+                        rarity = (hwPets and hwPets.Specs and hwPets.Specs[displayCat]) and hwPets.Specs[displayCat].Rarity or "Unknown"
                     end
                     
-                    -- Fallback caso falhe nos módulos
-                    if base == 0 then
-                        base = tonumber((rawModel and (rawModel:GetAttribute("Income") or rawModel:GetAttribute("EarningRate"))) or rec.Income or rec.EarningRate or rec.MoneyPerSecond) or 0
-                        if base == 0 and type(rec.ItemData) == "table" then base = tonumber(rec.ItemData.MoneyPerSecond or rec.ItemData.Income) or 0 end
-                    end
                     base = (base == 0) and 1 or base
                     
-                    -- MULTIPLICADORES DE MUTAÇÃO RESTAURADOS
+                    -- Calcula o Multiplicador de Escala e Mutação
                     local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
                     local mutMult = 1
                     if mutModule and mAttr then
@@ -469,10 +511,11 @@ task.spawn(function()
                         mutMult = 1.5 
                     end
                     
+                    -- Preço Final Definitivo
                     real = math.floor((base * scaleMult * mutMult) + 0.5)
 
-                    -- TESTE DO CÁLCULO NATIVO (Se o motor interno gerar um valor maior, o radar assume esse valor)
-                    if AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
+                    -- Se NÃO for um ovo da nossa Database, testa se o motor nativo devolve um valor maior
+                    if not hwData and AssetEarnings and AssetEarnings.MutationOnlyRatePerSecond then
                         local nativeReal = 0
                         pcall(function() nativeReal = tonumber(AssetEarnings.MutationOnlyRatePerSecond({Category = cat, Mutations = mAttr, Scale = scale})) or 0 end)
                         if nativeReal == 0 and displayCat ~= cat then
@@ -483,7 +526,6 @@ task.spawn(function()
                     
                     local pesoFinal = basePeso and (basePeso * scale) or nil
                     local pesoStr = pesoFinal and string.format("%.1f Kg", pesoFinal) or string.format("%.1fx", scale)
-                    local rarity = (hwPets and hwPets.Specs and hwPets.Specs[displayCat]) and hwPets.Specs[displayCat].Rarity or "Unknown"
                     
                     cachedEggs[u] = {C=displayCat, A=area, S=scale, R=real, P=pesoStr, Rar=rarity, CS=(pesoFinal or scale)}
                 end
