@@ -826,7 +826,7 @@ task.spawn(function()
                 if not allUids[k] then
                     cachedEggs[k] = nil
                 end
-            endwawsda
+            end
             
         end)
     end
