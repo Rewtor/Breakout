@@ -713,7 +713,42 @@ task.spawn(function()
                     
                     base = (base == 0) and 1 or base
                     
-                    local scaleMult = (scale <= 5) and (scale ^ 1.85) or (((scale / 5) ^ 1.2) * 19.637875755794)
+                    -- Corrige apenas a escala usada na renda dos ovos de Halloween.
+                    -- A escala exibida, filtros, mutacoes e demais sistemas permanecem iguais.
+                    local incomeScale = scale
+                    if hwData and rawModel and rawModel:IsA("Model") and rawModel:GetAttribute("HalloweenEggUid") ~= nil then
+                        pcall(function()
+                            local dataFolder = j:FindFirstChild("Data")
+                            local petsModule = dataFolder and dataFolder:FindFirstChild("HalloweenPets")
+                            if not petsModule then return end
+                            local specs = require(petsModule).Specs
+                            if type(specs) ~= "table" then return end
+                            local sourceName = rawModel:GetAttribute("PreparedSourceName")
+                            local spec = specs[displayCat] or specs[cat]
+                            if type(spec) ~= "table" then
+                                for key, entry in pairs(specs) do
+                                    if type(entry) == "table" and ((sourceName and (entry.EggSource == sourceName or entry.EggModel == sourceName)) or entry.Id == displayCat or key == displayCat) then
+                                        spec = entry
+                                        break
+                                    end
+                                end
+                            end
+                            if type(spec) ~= "table" or type(spec.EggModel) ~= "string" then return end
+                            local zone = tonumber(rawModel:GetAttribute("Zone"))
+                            if zone ~= 1 and zone ~= 2 and zone ~= 3 then return end
+                            local assetsFolder = j:FindFirstChild("Assets")
+                            local modelsFolder = assetsFolder and assetsFolder:FindFirstChild("Models")
+                            local eggsFolder = modelsFolder and modelsFolder:FindFirstChild("Eggs")
+                            local template = eggsFolder and eggsFolder:FindFirstChild(spec.EggModel)
+                            if not template or not template:IsA("Model") then return end
+                            if math.abs(template:GetScale() - 1) > 0.000001 then return end
+                            local size = template:GetExtentsSize()
+                            local largestDimension = math.max(size.X, size.Y, size.Z)
+                            local corrected = rawModel:GetScale() * largestDimension / (4.5 + zone)
+                            if corrected > 0 and corrected < math.huge then incomeScale = corrected end
+                        end)
+                    end
+                    local scaleMult = (incomeScale <= 5) and (incomeScale ^ 1.85) or (((incomeScale / 5) ^ 1.2) * 19.637875755794)
                     local mutMult = 1
                     if mutModule and mAttr then
                         pcall(function() mutMult = tonumber(mutModule.EarningsFor(mAttr)) or 1 end)
@@ -791,7 +826,7 @@ task.spawn(function()
                 if not allUids[k] then
                     cachedEggs[k] = nil
                 end
-            end
+            endwawsda
             
         end)
     end
