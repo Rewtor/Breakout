@@ -93,7 +93,7 @@ local alive = true
 local paused = false
 local mobile = UIS.TouchEnabled
 local compact = mobile
-local minimized = false
+local minimized = true
 
 local connections = {}
 local cached = {}
@@ -1970,6 +1970,9 @@ local function scan()
 
     render()
 end
+
+body.Visible = false
+minimizeButton.Text = "+"
 
 layout()
 
