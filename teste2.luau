@@ -1,5 +1,5 @@
 -- =========================================================
--- DICE RADAR V18 LITE
+-- DICE RADAR V18 LITE | HOP POR PAGINA
 -- Painel mobile + ranking + webhook + server hop
 -- Sem ESP, coleta automatica ou atualizacao por frame.
 -- =========================================================
@@ -218,7 +218,6 @@ local cancelHop
 local isHopping = false
 local hopGeneration = 0
 local lastValidEggTime = os.clock()
-local visited = {[game.JobId] = true}
 
 -- =========================================================
 -- INTERFACE
@@ -1634,9 +1633,9 @@ doServerHop = function()
 
     local ok, err = pcall(function()
         local cursor = ""
-        local candidates, seen = {}, {}
         local failures = 0
         local target = cfg.PC
+        local remainingToSkip = target == 1 and 50 or 0
 
         for page = 1, 30 do
             if not current() then return end
@@ -1670,24 +1669,43 @@ doServerHop = function()
             else
                 failures = 0
 
-                for _, server in ipairs(data.data) do
+                -- Candidatos existem apenas para esta pagina.
+                -- Modo 1: descarta somente os primeiros 50 resultados da busca inteira.
+                local candidates = {}
+                local skipped = math.min(remainingToSkip, #data.data)
+                remainingToSkip = remainingToSkip - skipped
+                local firstIndex = skipped + 1
+                for index = firstIndex, #data.data do
+                    local server = data.data[index]
                     if type(server) == "table" then
                         local playing = finite(server.playing)
                         local maximum = finite(server.maxPlayers)
 
                         if type(server.id) == "string"
-                            and not visited[server.id]
-                            and not seen[server.id]
+                            and server.id ~= ""
+                            and server.id ~= game.JobId
                             and playing == target
                             and maximum and playing < maximum then
-                            seen[server.id] = true
                             candidates[#candidates + 1] = server.id
                         end
                     end
                 end
 
-                if #candidates >= 8
-                    or type(data.nextPageCursor) ~= "string"
+                if #candidates > 0 then
+                    if not current() then return end
+                    local selected = candidates[math.random(1, #candidates)]
+                    hopStatus.Text = "Teleportando..."
+                    Teleport:TeleportToPlaceInstance(game.PlaceId, selected, player)
+
+                    task.delay(12, function()
+                        if current() and isHopping then
+                            release("Teleporte não concluído. Tente novamente.")
+                        end
+                    end)
+                    return
+                end
+
+                if type(data.nextPageCursor) ~= "string"
                     or data.nextPageCursor == "" then
                     break
                 end
@@ -1699,22 +1717,7 @@ doServerHop = function()
 
         if not current() then return end
 
-        if #candidates == 0 then
-            release("Nenhum servidor novo com " .. target .. " jogador(es).")
-            return
-        end
-
-        local selected = candidates[math.random(1, #candidates)]
-        visited[selected] = true
-        hopStatus.Text = "Teleportando..."
-
-        Teleport:TeleportToPlaceInstance(game.PlaceId, selected, player)
-
-        task.delay(12, function()
-            if current() and isHopping then
-                release("Teleporte não concluído. Tente novamente.")
-            end
-        end)
+        release("Nenhum servidor com " .. target .. " jogador(es) passou pelo filtro.")
     end)
 
     if not ok then
@@ -1741,10 +1744,7 @@ end)
 
 connect(cancelButton.Activated, cancelHop)
 
-addButton("Limpar servidores visitados nesta sessão", function()
-    visited = {[game.JobId] = true}
-    hopStatus.Text = "Histórico de servidores limpo."
-end)
+
 
 -- =========================================================
 -- DESCOBERTA E VARREDURA
