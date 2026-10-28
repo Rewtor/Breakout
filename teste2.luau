@@ -1635,7 +1635,7 @@ doServerHop = function()
         local cursor = ""
         local failures = 0
         local target = cfg.PC
-        local remainingToSkip = target == 1 and 20 or 0
+        local remainingToSkip = target == 1 and 50 or 0
 
         for page = 1, 30 do
             if not current() then return end
@@ -1827,6 +1827,31 @@ local function collectSources()
                         end
                     end
                 end
+            end
+        end
+    end
+
+    -- O estado atualizado tem prioridade sobre valores em cache ou modelos antigos.
+    -- Claimed foi confirmado no diagnostico de ovos coletados do mapa normal.
+    for uid, rec in pairs(records) do
+        local model = models[uid]
+        local halloween = rec.HalloweenEggUid ~= nil
+            or (model and model:GetAttribute("HalloweenEggUid") ~= nil)
+        if not halloween and rec.State == "Claimed" then
+            all[uid] = nil
+            models[uid] = nil
+            -- Invalida imediatamente a renda usada por notificacoes ainda nao enviadas.
+            if cached[uid] then
+                cached[uid] = nil
+                dataVersion = dataVersion + 1
+            end
+            cacheState[uid] = nil
+            knownSources[uid] = nil
+            notified[uid] = nil
+            local row = rows[uid]
+            if row then
+                row.frame:Destroy()
+                rows[uid] = nil
             end
         end
     end
