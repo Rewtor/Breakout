@@ -1635,7 +1635,7 @@ doServerHop = function()
         local cursor = ""
         local failures = 0
         local target = cfg.PC
-        local remainingToSkip = target == 1 and 50 or 0
+        local remainingToSkip = target == 1 and 20 or 0
 
         for page = 1, 30 do
             if not current() then return end
