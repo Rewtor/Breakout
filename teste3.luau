@@ -1970,6 +1970,60 @@ local function promptPosition(prompt)
     if parent:IsA("Model") then return parent:GetPivot().Position end
 end
 
+-- Nao presume que o prompt se chama StealPrompt. Um unico prompt
+-- no modelo pode ser usado; varios prompts desconhecidos sao ambiguos.
+local function collectionPrompt(model)
+    local named = model:FindFirstChild("StealPrompt", true)
+    if named and named:IsA("ProximityPrompt") then return named end
+    local found
+    for _, child in ipairs(model:GetDescendants()) do
+        if child:IsA("ProximityPrompt") then
+            if found then return nil, "ambiguo" end
+            found = child
+        end
+    end
+    return found, found and nil or "ausente"
+end
+
+local function collectionPosition(model)
+    if not model then return nil end
+    if model:IsA("Model") then return model:GetPivot().Position end
+    if model:IsA("BasePart") then return model.Position end
+    local part = model:FindFirstChildWhichIsA("BasePart", true)
+    return part and part.Position or nil
+end
+
+-- Prompts fora do modelo precisam compartilhar o UID em um ancestral.
+-- Proximidade sozinha nao prova que a interacao pertence ao ovo.
+local function promptMatchesUid(prompt, uid)
+    local object = prompt.Parent
+    while object and object ~= Workspace do
+        for _, key in ipairs({"UID", "Uid", "EggUid", "Id"}) do
+            local value = object:GetAttribute(key)
+            if value ~= nil and tostring(value) == uid then return true end
+        end
+        if object.Name == uid then return true end
+        object = object.Parent
+    end
+    return false
+end
+
+local function nearbyCollectionPrompt(model, uid, root, pool)
+    local localPrompt = collectionPrompt(model)
+    if localPrompt and localPrompt.Enabled then return localPrompt end
+    local found
+    for candidate in pairs(pool) do
+        local pos = promptPosition(candidate)
+        if pos and candidate.Enabled and candidate:IsDescendantOf(Workspace)
+            and (pos - root.Position).Magnitude <= candidate.MaxActivationDistance
+            and promptMatchesUid(candidate, uid) then
+            if found and found ~= candidate then return nil end
+            found = candidate
+        end
+    end
+    return found
+end
+
 local function runCollection(uid, model, prompt)
     collectorBusy = true
     collector.generation = collector.generation + 1
@@ -1987,7 +2041,7 @@ local function runCollection(uid, model, prompt)
     local ok, err = pcall(function()
         if not active() then return end
         local origin = root.Position
-        local target = promptPosition(prompt)
+        local target = promptPosition(prompt) or collectionPosition(model)
         if not target or not model:IsDescendantOf(Workspace) then
             collectionMessage("Ovo indisponivel antes da coleta.")
             return
@@ -1997,14 +2051,15 @@ local function runCollection(uid, model, prompt)
         params.FilterType = Enum.RaycastFilterType.Exclude
         params.FilterDescendantsInstances = {character, model}
         local landing
-        local radius = math.min(4, prompt.MaxActivationDistance * 0.45)
+        local approachDistance = prompt and prompt.MaxActivationDistance or 12
+        local radius = math.min(4, approachDistance * 0.45)
         for i = 0, 7 do
             local angle = i * math.pi / 4
             local offset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
             local hit = Workspace:Raycast(target + offset + Vector3.new(0, 12, 0), Vector3.new(0, -48, 0), params)
             if hit and hit.Normal.Y > 0.6 then
                 local candidate = hit.Position + Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2, 0)
-                if (candidate - target).Magnitude <= prompt.MaxActivationDistance then
+                if (candidate - target).Magnitude <= approachDistance then
                     landing = candidate
                     break
                 end
@@ -2019,12 +2074,31 @@ local function runCollection(uid, model, prompt)
         task.wait(0.4)
         if not active() then return end
         local pickupOk, pickupError = pcall(function()
-            -- Alguns prompts podem ser habilitados somente ao se aproximar.
-            local promptDeadline = os.clock() + 3
-            while active() and prompt.Parent and not prompt.Enabled
-                and os.clock() < promptDeadline do task.wait(0.1) end
+            collectionMessage("Perto do ovo; procurando a interacao E...")
+            local pool = {}
+            local listener = Workspace.DescendantAdded:Connect(function(object)
+                if object:IsA("ProximityPrompt") then pool[object] = true end
+            end)
+            local searchOk, searchError = pcall(function()
+                -- Uma varredura por tentativa, nao a cada frame.
+                for _, object in ipairs(Workspace:GetDescendants()) do
+                    if object:IsA("ProximityPrompt") then pool[object] = true end
+                end
+                local promptDeadline = os.clock() + 5
+                repeat
+                    if not active() then return end
+                    prompt = nearbyCollectionPrompt(model, uid, root, pool)
+                    if prompt then return end
+                    task.wait(0.2)
+                until os.clock() >= promptDeadline
+            end)
+            listener:Disconnect()
+            if not searchOk then error(searchError) end
             if not active() then return end
             local pos = promptPosition(prompt)
+            if not prompt then
+                error("E nao associado ao UID do ovo; pode ser interface personalizada")
+            end
             if not pos or not prompt.Enabled or (root.Position - pos).Magnitude > prompt.MaxActivationDistance then
                 error("fora de alcance ou prompt indisponivel")
             end
@@ -2088,21 +2162,6 @@ local function runCollection(uid, model, prompt)
     lastValidEggTime = os.clock()
 end
 
--- Nao presume que o prompt se chama StealPrompt. Um unico prompt
--- no modelo pode ser usado; varios prompts desconhecidos sao ambiguos.
-local function collectionPrompt(model)
-    local named = model:FindFirstChild("StealPrompt", true)
-    if named and named:IsA("ProximityPrompt") then return named end
-    local found
-    for _, child in ipairs(model:GetDescendants()) do
-        if child:IsA("ProximityPrompt") then
-            if found then return nil, "ambiguo" end
-            found = child
-        end
-    end
-    return found, found and nil or "ausente"
-end
-
 local function updateCollection(models, records, all, now)
     if not collector.enabled then return end
     for uid in pairs(all) do
@@ -2136,10 +2195,10 @@ local function updateCollection(models, records, all, now)
             if not prompt then
                 if reason == "ambiguo" then counts.ambiguous = counts.ambiguous + 1
                 else counts.missing = counts.missing + 1 end
-                pendingData = true
-            elseif not bestRate or data.R > bestRate
-                or (data.R == bestRate and uid < bestUid) then
-                -- Enabled e conferido apos a chegada, sem forcar sua alteracao.
+            end
+            -- A ausencia de prompt distante nao exclui um modelo com posicao.
+            if collectionPosition(model) and (not bestRate or data.R > bestRate
+                or (data.R == bestRate and uid < bestUid)) then
                 bestUid, bestModel, bestPrompt, bestRate = uid, model, prompt, data.R
             end
         end
