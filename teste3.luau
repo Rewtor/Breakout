@@ -2049,7 +2049,7 @@ local function runCollection(uid, model, rec)
                 part.AssemblyAngularVelocity = Vector3.zero
             end
         end
-        task.wait(0.4)
+        task.wait(1.5)
         if not active() then return end
         local confirmed = false
         local pickupOk, pickupError = pcall(function()
