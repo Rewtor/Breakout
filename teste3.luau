@@ -1,7 +1,7 @@
 -- =========================================================
 -- DICE RADAR V18 LITE | HOP POR PAGINA
 -- Painel mobile + ranking + webhook + server hop
--- Coleta opcional: teleporte de ida e retorno andando; sem ESP.
+-- Coleta opcional: ida andando e retorno andando; sem ESP.
 -- =========================================================
 
 local Players = game:GetService("Players")
@@ -2038,22 +2038,37 @@ local function runCollection(uid, model, rec)
             collectionMessage("Ovo sem posicao ou ja coletado.")
             return
         end
-        local landing = target + Vector3.new(0, 3, 0)
-        local targetCFrame = CFrame.new(landing) * root.CFrame.Rotation
-        collectionMessage("Teleportando para o ovo de maior renda...")
-        character:PivotTo(targetCFrame)
-        if (root.Position - landing).Magnitude > 3 then root.CFrame = targetCFrame end
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.AssemblyLinearVelocity = Vector3.zero
-                part.AssemblyAngularVelocity = Vector3.zero
+        
+        collectionMessage("Caminhando até o ovo de maior renda...")
+        local path = game:GetService("PathfindingService"):CreatePath({
+            AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4,
+        })
+        
+        local computed = pcall(function() path:ComputeAsync(root.Position, target) end)
+        
+        if computed and path.Status == Enum.PathStatus.Success then
+            for _, waypoint in ipairs(path:GetWaypoints()) do
+                if not active() then break end
+                if waypoint.Action == Enum.PathWaypointAction.Jump then humanoid.Jump = true end
+                humanoid:MoveTo(waypoint.Position)
+                
+                local timeout = os.clock() + 6
+                while active() and os.clock() < timeout and (root.Position - waypoint.Position).Magnitude > 3 do 
+                    task.wait(0.1) 
+                end
             end
+        else
+            collectionMessage("Caminho bloqueado para o ovo. Abortando coleta.")
+            collectorBusy = false
+            return
         end
-        task.wait(1.5)
+        
+        task.wait(0.2)
+        
         if not active() then return end
         local confirmed = false
         local pickupOk, pickupError = pcall(function()
-            if (root.Position - landing).Magnitude > 12 then
+            if (root.Position - target).Magnitude > 12 then
                 error("personagem nao permaneceu perto do destino")
             end
             collectionMessage("Solicitando CarryFieldEgg; aguardando confirmacao...")
@@ -2068,7 +2083,7 @@ local function runCollection(uid, model, rec)
                     end
                     error("outro ovo esta sendo carregado")
                 end
-                if (root.Position - landing).Magnitude > 12 then
+                if (root.Position - target).Magnitude > 12 then
                     error("personagem saiu do alcance do ovo")
                 end
                 local requested, failure = pcall(state.CarryFieldEgg, uid)
@@ -2096,13 +2111,13 @@ local function runCollection(uid, model, rec)
             if not active() or os.clock() >= deadline then break end
             if (root.Position - origin).Magnitude <= 3 then arrived = true break end
             collectionMessage("Voltando andando ao ponto inicial...")
-            local path = game:GetService("PathfindingService"):CreatePath({
+            local pathReturn = game:GetService("PathfindingService"):CreatePath({
                 AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4,
             })
-            local computed = pcall(function() path:ComputeAsync(root.Position, origin) end)
-            if not active() then path:Destroy() return end
-            if computed and path.Status == Enum.PathStatus.Success then
-                for _, waypoint in ipairs(path:GetWaypoints()) do
+            local computedReturn = pcall(function() pathReturn:ComputeAsync(root.Position, origin) end)
+            if not active() then pathReturn:Destroy() return end
+            if computedReturn and pathReturn.Status == Enum.PathStatus.Success then
+                for _, waypoint in ipairs(pathReturn:GetWaypoints()) do
                     if not active() or os.clock() >= deadline then break end
                     if waypoint.Action == Enum.PathWaypointAction.Jump then humanoid.Jump = true end
                     humanoid:MoveTo(waypoint.Position)
@@ -2112,7 +2127,7 @@ local function runCollection(uid, model, rec)
                     if not active() or (root.Position - waypoint.Position).Magnitude > 3 then break end
                 end
             end
-            path:Destroy()
+            pathReturn:Destroy()
             if (root.Position - origin).Magnitude <= 3 then arrived = true break end
             task.wait(0.3)
         end
