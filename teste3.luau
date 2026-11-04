@@ -1950,6 +1950,7 @@ addToggle("Coletar o mais caro e voltar andando", false, function(value)
         stopCollection()
     else
         table.clear(collector.seen)
+        table.clear(collector.attempted)
         collector.pending = true
         collector.startedAt = os.clock()
         collector.changedAt = os.clock()
@@ -1987,7 +1988,7 @@ local function runCollection(uid, model, prompt)
         if not active() then return end
         local origin = root.Position
         local target = promptPosition(prompt)
-        if not target or not prompt.Enabled or not model:IsDescendantOf(Workspace) then
+        if not target or not model:IsDescendantOf(Workspace) then
             collectionMessage("Ovo indisponivel antes da coleta.")
             return
         end
@@ -2018,6 +2019,11 @@ local function runCollection(uid, model, prompt)
         task.wait(0.4)
         if not active() then return end
         local pickupOk, pickupError = pcall(function()
+            -- Alguns prompts podem ser habilitados somente ao se aproximar.
+            local promptDeadline = os.clock() + 3
+            while active() and prompt.Parent and not prompt.Enabled
+                and os.clock() < promptDeadline do task.wait(0.1) end
+            if not active() then return end
             local pos = promptPosition(prompt)
             if not pos or not prompt.Enabled or (root.Position - pos).Magnitude > prompt.MaxActivationDistance then
                 error("fora de alcance ou prompt indisponivel")
@@ -2082,6 +2088,21 @@ local function runCollection(uid, model, prompt)
     lastValidEggTime = os.clock()
 end
 
+-- Nao presume que o prompt se chama StealPrompt. Um unico prompt
+-- no modelo pode ser usado; varios prompts desconhecidos sao ambiguos.
+local function collectionPrompt(model)
+    local named = model:FindFirstChild("StealPrompt", true)
+    if named and named:IsA("ProximityPrompt") then return named end
+    local found
+    for _, child in ipairs(model:GetDescendants()) do
+        if child:IsA("ProximityPrompt") then
+            if found then return nil, "ambiguo" end
+            found = child
+        end
+    end
+    return found, found and nil or "ausente"
+end
+
 local function updateCollection(models, records, all, now)
     if not collector.enabled then return end
     for uid in pairs(all) do
@@ -2096,29 +2117,44 @@ local function updateCollection(models, records, all, now)
     if now - collector.changedAt < 3 and now - collector.startedAt < 12 then return end
     local bestUid, bestModel, bestPrompt, bestRate
     local pendingData = false
-    for uid, model in pairs(models) do
-        local data = cached[uid]
-        local rec = records[uid]
-        local prompt = model:FindFirstChild("StealPrompt", true)
-        if all[uid] and not collector.attempted[uid] and (not rec or rec.State ~= "Claimed")
-            and prompt and prompt:IsA("ProximityPrompt") and prompt.Enabled then
-            if not data or not data.Ready then
+    local counts = {total=0, noModel=0, pending=0, missing=0, ambiguous=0, claimed=0, tried=0}
+    for uid in pairs(all) do
+        counts.total = counts.total + 1
+        local model, data, rec = models[uid], cached[uid], records[uid]
+        if collector.attempted[uid] then
+            counts.tried = counts.tried + 1
+        elseif rec and rec.State == "Claimed" then
+            counts.claimed = counts.claimed + 1
+        elseif not model then
+            counts.noModel = counts.noModel + 1
+            pendingData = true
+        elseif not data or not data.Ready then
+            counts.pending = counts.pending + 1
+            pendingData = true
+        else
+            local prompt, reason = collectionPrompt(model)
+            if not prompt then
+                if reason == "ambiguo" then counts.ambiguous = counts.ambiguous + 1
+                else counts.missing = counts.missing + 1 end
                 pendingData = true
             elseif not bestRate or data.R > bestRate
                 or (data.R == bestRate and uid < bestUid) then
+                -- Enabled e conferido apos a chegada, sem forcar sua alteracao.
                 bestUid, bestModel, bestPrompt, bestRate = uid, model, prompt, data.R
             end
         end
     end
-    if pendingData and now - collector.startedAt < 12 then return end
-    -- Um ciclo por lote; nao passa a coletar o segundo, terceiro etc.
-    collector.pending = false
-    if bestUid then
+    if bestUid and not (pendingData and now - collector.startedAt < 12) then
+        collector.pending = false
         collector.attempted[bestUid] = true
         collectorBusy = true
         task.spawn(runCollection, bestUid, bestModel, bestPrompt)
     else
-        collectionMessage("Nenhum ovo calculado com prompt disponivel neste lote.")
+        -- Falta de dados nao consome o lote. Nova verificacao no proximo scan.
+        collectionMessage(string.format(
+            "Aguardando: %d ovos | sem modelo: %d | renda pendente: %d\nSem prompt: %d | ambiguos: %d | coletados: %d | tentados: %d",
+            counts.total, counts.noModel, counts.pending, counts.missing,
+            counts.ambiguous, counts.claimed, counts.tried))
     end
 end
 
