@@ -1962,30 +1962,10 @@ addButton("Cancelar coleta/retorno atual", function()
     stopCollection()
 end)
 
-local function promptPosition(prompt)
-    local parent = prompt and prompt.Parent
-    if not parent then return nil end
-    if parent:IsA("Attachment") then return parent.WorldPosition end
-    if parent:IsA("BasePart") then return parent.Position end
-    if parent:IsA("Model") then return parent:GetPivot().Position end
-end
-
--- Nao presume que o prompt se chama StealPrompt. Um unico prompt
--- no modelo pode ser usado; varios prompts desconhecidos sao ambiguos.
-local function collectionPrompt(model)
-    local named = model:FindFirstChild("StealPrompt", true)
-    if named and named:IsA("ProximityPrompt") then return named end
-    local found
-    for _, child in ipairs(model:GetDescendants()) do
-        if child:IsA("ProximityPrompt") then
-            if found then return nil, "ambiguo" end
-            found = child
-        end
-    end
-    return found, found and nil or "ausente"
-end
-
-local function collectionPosition(model)
+-- API observada no script de referencia: BottomCFrame, CarryFieldEgg,
+-- CarryChanged({IsCarrying, Uid}). Nao usa nomes de remotes presumidos.
+local function collectionDestination(model, rec)
+    if rec and typeof(rec.BottomCFrame) == "CFrame" then return rec.BottomCFrame.Position end
     if not model then return nil end
     if model:IsA("Model") then return model:GetPivot().Position end
     if model:IsA("BasePart") then return model.Position end
@@ -1993,38 +1973,37 @@ local function collectionPosition(model)
     return part and part.Position or nil
 end
 
--- Prompts fora do modelo precisam compartilhar o UID em um ancestral.
--- Proximidade sozinha nao prova que a interacao pertence ao ovo.
-local function promptMatchesUid(prompt, uid)
-    local object = prompt.Parent
-    while object and object ~= Workspace do
-        for _, key in ipairs({"UID", "Uid", "EggUid", "Id"}) do
-            local value = object:GetAttribute(key)
-            if value ~= nil and tostring(value) == uid then return true end
-        end
-        if object.Name == uid then return true end
-        object = object.Parent
+local carryObserver = {module = nil, link = nil, carrying = false, uid = nil, revision = 0}
+local function bindCarryObserver()
+    local state = modules.EggState
+    if carryObserver.module == state and carryObserver.link then return true end
+    if carryObserver.link then
+        carryObserver.link:Disconnect()
+        carryObserver.link = nil
+    end
+    carryObserver.module = state
+    carryObserver.carrying, carryObserver.uid = false, nil
+    if not state or not state.CarryChanged then return false end
+    local ok, link = pcall(function()
+        return state.CarryChanged:Connect(function(event)
+            if type(event) ~= "table" then return end
+            carryObserver.revision = carryObserver.revision + 1
+            carryObserver.carrying = event.IsCarrying == true
+            carryObserver.uid = carryObserver.carrying and event.Uid or nil
+        end)
+    end)
+    if ok and link then
+        carryObserver.link = link
+        return true
     end
     return false
 end
+connect(gui.Destroying, function()
+    if carryObserver.link then carryObserver.link:Disconnect() end
+    carryObserver.link = nil
+end)
 
-local function nearbyCollectionPrompt(model, uid, root, pool)
-    local localPrompt = collectionPrompt(model)
-    if localPrompt and localPrompt.Enabled then return localPrompt end
-    local found
-    for candidate in pairs(pool) do
-        local pos = promptPosition(candidate)
-        if pos and candidate.Enabled and candidate:IsDescendantOf(Workspace)
-            and (pos - root.Position).Magnitude <= candidate.MaxActivationDistance
-            and promptMatchesUid(candidate, uid) then
-            if found and found ~= candidate then return nil end
-            found = candidate
-        end
-    end
-    return found
-end
-
-local function runCollection(uid, model, prompt)
+local function runCollection(uid, model, rec)
     collectorBusy = true
     collector.generation = collector.generation + 1
     local generation = collector.generation
@@ -2040,81 +2019,75 @@ local function runCollection(uid, model, prompt)
     end
     local ok, err = pcall(function()
         if not active() then return end
-        local origin = root.Position
-        local target = promptPosition(prompt) or collectionPosition(model)
-        if not target or not model:IsDescendantOf(Workspace) then
-            collectionMessage("Ovo indisponivel antes da coleta.")
+        local state = modules.EggState
+        if not state or type(state.CarryFieldEgg) ~= "function" then
+            collectionMessage("EggState.CarryFieldEgg indisponivel; nenhuma movimentacao realizada.")
             return
         end
-        -- Escolhe um ponto com chao perto do prompt, dentro de seu alcance.
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = {character, model}
-        local landing
-        local approachDistance = prompt and prompt.MaxActivationDistance or 12
-        local radius = math.min(4, approachDistance * 0.45)
-        for i = 0, 7 do
-            local angle = i * math.pi / 4
-            local offset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
-            local hit = Workspace:Raycast(target + offset + Vector3.new(0, 12, 0), Vector3.new(0, -48, 0), params)
-            if hit and hit.Normal.Y > 0.6 then
-                local candidate = hit.Position + Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2, 0)
-                if (candidate - target).Magnitude <= approachDistance then
-                    landing = candidate
-                    break
-                end
+        if not bindCarryObserver() then
+            collectionMessage("CarryChanged indisponivel; nao e possivel confirmar a coleta.")
+            return
+        end
+        if carryObserver.carrying then
+            collectionMessage("Voce ja esta carregando um ovo; coleta adiada.")
+            return
+        end
+        local origin = root.Position
+        local target = collectionDestination(model, rec)
+        if not target or (rec and rec.State == "Claimed") then
+            collectionMessage("Ovo sem posicao ou ja coletado.")
+            return
+        end
+        local landing = target + Vector3.new(0, 3, 0)
+        local targetCFrame = CFrame.new(landing) * root.CFrame.Rotation
+        collectionMessage("Teleportando para o ovo de maior renda...")
+        character:PivotTo(targetCFrame)
+        if (root.Position - landing).Magnitude > 3 then root.CFrame = targetCFrame end
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.AssemblyLinearVelocity = Vector3.zero
+                part.AssemblyAngularVelocity = Vector3.zero
             end
         end
-        if not landing then
-            collectionMessage("Sem ponto de chegada seguro no alcance do ovo.")
-            return
-        end
-        root.CFrame = CFrame.new(landing)
-        root.AssemblyLinearVelocity = Vector3.zero
         task.wait(0.4)
         if not active() then return end
+        local confirmed = false
         local pickupOk, pickupError = pcall(function()
-            collectionMessage("Perto do ovo; procurando a interacao E...")
-            local pool = {}
-            local listener = Workspace.DescendantAdded:Connect(function(object)
-                if object:IsA("ProximityPrompt") then pool[object] = true end
-            end)
-            local searchOk, searchError = pcall(function()
-                -- Uma varredura por tentativa, nao a cada frame.
-                for _, object in ipairs(Workspace:GetDescendants()) do
-                    if object:IsA("ProximityPrompt") then pool[object] = true end
+            if (root.Position - landing).Magnitude > 12 then
+                error("personagem nao permaneceu perto do destino")
+            end
+            collectionMessage("Solicitando CarryFieldEgg; aguardando confirmacao...")
+            local initialRevision = carryObserver.revision
+            local requestError
+            for attempt = 1, 3 do
+                if not active() then return end
+                if carryObserver.carrying then
+                    if carryObserver.uid == uid and carryObserver.revision > initialRevision then
+                        confirmed = true
+                        return
+                    end
+                    error("outro ovo esta sendo carregado")
                 end
-                local promptDeadline = os.clock() + 5
+                if (root.Position - landing).Magnitude > 12 then
+                    error("personagem saiu do alcance do ovo")
+                end
+                local requested, failure = pcall(state.CarryFieldEgg, uid)
+                if not requested then requestError = tostring(failure) end
+                local deadline = os.clock() + 1.5
                 repeat
                     if not active() then return end
-                    prompt = nearbyCollectionPrompt(model, uid, root, pool)
-                    if prompt then return end
-                    task.wait(0.2)
-                until os.clock() >= promptDeadline
-            end)
-            listener:Disconnect()
-            if not searchOk then error(searchError) end
-            if not active() then return end
-            local pos = promptPosition(prompt)
-            if not prompt then
-                error("E nao associado ao UID do ovo; pode ser interface personalizada")
+                    if carryObserver.carrying then
+                        if carryObserver.uid == uid and carryObserver.revision > initialRevision then
+                            confirmed = true
+                            return
+                        end
+                        error("outro ovo esta sendo carregado")
+                    end
+                    task.wait(0.1)
+                until os.clock() >= deadline
             end
-            if not pos or not prompt.Enabled or (root.Position - pos).Magnitude > prompt.MaxActivationDistance then
-                error("fora de alcance ou prompt indisponivel")
-            end
-            collectionMessage("Acionando coleta; depois voltando andando...")
-            collector.prompt = prompt
-            prompt:InputHoldBegin()
-            local untilTime = os.clock() + prompt.HoldDuration + 0.25
-            while active() and prompt.Parent and os.clock() < untilTime do task.wait(0.1) end
-            pcall(function() prompt:InputHoldEnd() end)
-            collector.prompt = nil
-            if active() then task.wait(0.6) end
+            error(requestError or "CarryChanged nao confirmou o UID apos 3 tentativas")
         end)
-        if collector.prompt then
-            pcall(function() collector.prompt:InputHoldEnd() end)
-            collector.prompt = nil
-        end
         if not active() then return end
         -- Caminhada real: sem mudar WalkSpeed e sem teleporte no retorno.
         local deadline = os.clock() + 120
@@ -2147,7 +2120,7 @@ local function runCollection(uid, model, prompt)
             humanoid:MoveTo(root.Position)
             local result = arrived and "Retorno concluido." or "Retorno bloqueado; assuma o controle."
             collectionMessage(result .. (pickupOk
-                and " Coleta acionada; posse nao confirmada."
+                and (confirmed and " Coleta confirmada antes do retorno." or " Coleta nao confirmada.")
                 or " Coleta falhou: " .. tostring(pickupError)))
         end
     end)
@@ -2163,7 +2136,9 @@ local function runCollection(uid, model, prompt)
 end
 
 local function updateCollection(models, records, all, now)
+    bindCarryObserver()
     if not collector.enabled then return end
+    if carryObserver.carrying then return end
     for uid in pairs(all) do
         if not collector.seen[uid] then
             collector.seen[uid] = true
@@ -2174,7 +2149,7 @@ local function updateCollection(models, records, all, now)
     end
     if collectorBusy or isHopping or not collector.pending or paused then return end
     if now - collector.changedAt < 3 and now - collector.startedAt < 12 then return end
-    local bestUid, bestModel, bestPrompt, bestRate
+    local bestUid, bestModel, bestRecord, bestRate
     local pendingData = false
     local counts = {total=0, noModel=0, pending=0, missing=0, ambiguous=0, claimed=0, tried=0}
     for uid in pairs(all) do
@@ -2184,22 +2159,16 @@ local function updateCollection(models, records, all, now)
             counts.tried = counts.tried + 1
         elseif rec and rec.State == "Claimed" then
             counts.claimed = counts.claimed + 1
-        elseif not model then
+        elseif not collectionDestination(model, rec) then
             counts.noModel = counts.noModel + 1
             pendingData = true
         elseif not data or not data.Ready then
             counts.pending = counts.pending + 1
             pendingData = true
         else
-            local prompt, reason = collectionPrompt(model)
-            if not prompt then
-                if reason == "ambiguo" then counts.ambiguous = counts.ambiguous + 1
-                else counts.missing = counts.missing + 1 end
-            end
-            -- A ausencia de prompt distante nao exclui um modelo com posicao.
-            if collectionPosition(model) and (not bestRate or data.R > bestRate
-                or (data.R == bestRate and uid < bestUid)) then
-                bestUid, bestModel, bestPrompt, bestRate = uid, model, prompt, data.R
+            if not bestRate or data.R > bestRate
+                or (data.R == bestRate and uid < bestUid) then
+                bestUid, bestModel, bestRecord, bestRate = uid, model, rec, data.R
             end
         end
     end
@@ -2207,13 +2176,12 @@ local function updateCollection(models, records, all, now)
         collector.pending = false
         collector.attempted[bestUid] = true
         collectorBusy = true
-        task.spawn(runCollection, bestUid, bestModel, bestPrompt)
+        task.spawn(runCollection, bestUid, bestModel, bestRecord)
     else
         -- Falta de dados nao consome o lote. Nova verificacao no proximo scan.
         collectionMessage(string.format(
-            "Aguardando: %d ovos | sem modelo: %d | renda pendente: %d\nSem prompt: %d | ambiguos: %d | coletados: %d | tentados: %d",
-            counts.total, counts.noModel, counts.pending, counts.missing,
-            counts.ambiguous, counts.claimed, counts.tried))
+            "Aguardando: %d ovos | sem posicao: %d | renda pendente: %d\nColetados: %d | tentados: %d",
+            counts.total, counts.noModel, counts.pending, counts.claimed, counts.tried))
     end
 end
 
