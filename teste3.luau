@@ -2052,6 +2052,98 @@ local function startCollection(automatic)
         or "Ida e volta: aguardando os ovos carregarem...")
 end
 do
+    local motionReport=nil
+    local motionConnection=nil
+    local function stopMotion()
+        if motionConnection then motionConnection:Disconnect();motionConnection=nil end
+        if motionReport then motionReport.running=false end
+    end
+    local function coordinates(position) return {position.X,position.Y,position.Z} end
+    local function positionOf(prompt)
+        local parent=prompt.Parent
+        if not parent then return nil end
+        if parent:IsA("Attachment") then return parent.WorldPosition end
+        if parent:IsA("BasePart") then return parent.Position end
+        if parent:IsA("Model") then return parent:GetPivot().Position end
+    end
+    addButton("INICIAR observar movimento dos prompts (30s)",function()
+        if collectorBusy or collector.enabled then
+            collectionMessage("Desligue a coleta antes de observar os prompts.");return
+        end
+        stopMotion()
+        local character=player.Character
+        local root=character and character:FindFirstChild("HumanoidRootPart")
+        if not root then collectionMessage("Personagem indisponivel.");return end
+        local pool={}
+        for _,object in ipairs(Workspace:GetDescendants()) do
+            if object:IsA("ProximityPrompt") and object.Name=="CarryAreaEgg" then
+                local position=positionOf(object)
+                if position and (position-root.Position).Magnitude<=50 then
+                    pool[#pool+1]={instance=object,distance=(position-root.Position).Magnitude}
+                end
+            end
+        end
+        table.sort(pool,function(a,b) return a.distance<b.distance end)
+        if #pool==0 then collectionMessage("Nenhum CarryAreaEgg por perto. Aproxime-se de um ovo.");return end
+        motionReport={kind="prompt_motion_observation",version=1,running=true,prompts={},samples={},
+            note="IDs locais distinguem instancias de mesmo nome. Nenhuma interacao/movimentacao automatica."}
+        local tracked={}
+        for index=1,math.min(12,#pool) do
+            local prompt=pool[index].instance
+            tracked[index]=prompt
+            motionReport.prompts[index]={id=index,path=prompt:GetFullName(),range=prompt.MaxActivationDistance}
+        end
+        local started=os.clock()
+        local function sample()
+            local _,records=collectSources()
+            local eggs={}
+            for uid,record in pairs(records) do
+                if record.State~="Claimed" and typeof(record.BoundsCFrame)=="CFrame" then
+                    local position=record.BoundsCFrame.Position
+                    local distance=(position-root.Position).Magnitude
+                    if distance<=65 then
+                        eggs[#eggs+1]={uid=tostring(uid),bounds=coordinates(position),distance=distance,
+                            bottom=typeof(record.BottomCFrame)=="CFrame" and coordinates(record.BottomCFrame.Position) or nil}
+                    end
+                end
+            end
+            table.sort(eggs,function(a,b) return a.distance<b.distance end)
+            while #eggs>12 do table.remove(eggs) end
+            local prompts={}
+            for id,prompt in ipairs(tracked) do
+                local position=positionOf(prompt)
+                prompts[#prompts+1]={id=id,position=position and coordinates(position) or nil,
+                    present=prompt.Parent~=nil,enabled=prompt.Parent~=nil and prompt.Enabled or false}
+            end
+            motionReport.samples[#motionReport.samples+1]={time=os.clock()-started,
+                character=coordinates(root.Position),eggs=eggs,prompts=prompts}
+        end
+        sample()
+        local elapsed=0
+        motionConnection=game:GetService("RunService").Heartbeat:Connect(function(dt)
+            if not alive or player.Character~=character or not root.Parent or collector.enabled then stopMotion();return end
+            elapsed=elapsed+dt
+            if elapsed<0.5 then return end
+            elapsed=0
+            sample()
+            if os.clock()-started>=30 then
+                stopMotion()
+                collectionMessage("Observacao encerrada. Clique em PARAR e copiar movimento dos prompts.")
+            end
+        end)
+        collectionMessage("Observando por 30s: de pequenos passos ao redor do ovo, sem coletar. Depois copie o relatorio.")
+    end)
+    addButton("PARAR e copiar movimento dos prompts",function()
+        if not motionReport then collectionMessage("Inicie primeiro a observacao dos prompts.");return end
+        stopMotion()
+        local encoded=Http:JSONEncode(motionReport)
+        local saved=writefile and pcall(function() writefile("DiceRadar_MovimentoPrompts.json",encoded) end)
+        local copied=setclipboard and pcall(function() setclipboard(encoded) end)
+        collectionMessage(copied and "Movimento dos prompts copiado. Cole no chat."
+            or (saved and "Salvo em DiceRadar_MovimentoPrompts.json." or "Sem clipboard/arquivo; relatorio mantido nesta execucao."))
+    end)
+end
+do
     local monitor=nil
     local heartbeatConnection=nil
     local carryConnection=nil
