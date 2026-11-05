@@ -27,6 +27,7 @@ local SCAN_INTERVAL = 1.5
 local GEOMETRY_TTL = 60
 local CONFIG_FILE = "DiceRadar_Config.json"
 local DEFAULT_POSITION = Vector3.new(519.82, 71.85, -364.44)
+local BUILD_ID = "return-plane-v2"
 
 local function finite(value)
     local n = tonumber(value)
@@ -2421,7 +2422,7 @@ local function runCollection(uid, model, rec)
     local carryConnection=nil
     local carryConfirmed=false
     local interactionAttempted=false
-    local diagnostics={uid=tostring(uid),events={},phase="preparando",maxFrame=0,
+    local diagnostics={build=BUILD_ID,uid=tostring(uid),events={},phase="preparando",maxFrame=0,
         longestSlow=0,maxPlanWait=0,phaseTime=os.clock()}
     local diagnosticConnection=nil
     local slowSince=nil
@@ -2563,6 +2564,7 @@ local function runCollection(uid, model, rec)
         local returnMoveGoal=nil
         local returnGoalCommand=nil
         local returnGoalPassed=false
+        local returnGoalAxis=Vector3.zero
         local returnRouteInvalid=false
         local returnDirection=Vector3.zero
         local previousReturnFrame=root.Position
@@ -2579,6 +2581,8 @@ local function runCollection(uid, model, rec)
                 -- Renovar o comando nao pode reativar um waypoint ja cruzado.
                 if returnGoalCommand and (returnGoalCommand-point).Magnitude<0.01 then return end
                 returnGoalCommand=point;returnMoveGoal=point;returnGoalPassed=false
+                local delta=Vector3.new(point.X-root.Position.X,0,point.Z-root.Position.Z)
+                returnGoalAxis=delta.Magnitude>0 and delta.Unit or Vector3.zero
                 previousReturnFrame=root.Position
             else humanoid:MoveTo(point) end
         end
@@ -2598,15 +2602,19 @@ local function runCollection(uid, model, rec)
                     local t=lengthSquared>0 and offset:Dot(delta)/lengthSquared or -1
                     local crossed=t>=0 and t<=1 and (offset-delta*t).Magnitude<=3
                     local direction=Vector3.new(returnMoveGoal.X-current.X,0,returnMoveGoal.Z-current.Z)
-                    if crossed or direction.Magnitude<=3 then
+                    local passedPlane=returnGoalAxis.Magnitude>0 and direction:Dot(returnGoalAxis)<=0
+                    if crossed or direction.Magnitude<=3 or passedPlane then
                         local height=previousReturnFrame.Y+(current.Y-previousReturnFrame.Y)*math.clamp(t,0,1)
                         local tolerance=math.max(6,humanoid.HipHeight+root.Size.Y/2+3)
-                        if math.abs(height-returnMoveGoal.Y)<=tolerance then
+                        local lateral=(direction-returnGoalAxis*direction:Dot(returnGoalAxis)).Magnitude
+                        local corridor=math.clamp(humanoid.WalkSpeed*0.1,6,36)
+                        if math.abs(height-returnMoveGoal.Y)<=tolerance and lateral<=corridor then
                             returnGoalPassed=true
+                            if passedPlane then recordDiagnostic("waypoint_plano_cruzado",{lateral=lateral}) end
                         else
                             returnRouteInvalid=true
-                            recordDiagnostic("waypoint_altura_incompativel",{target={returnMoveGoal.X,returnMoveGoal.Y,returnMoveGoal.Z},
-                                position={current.X,current.Y,current.Z}})
+                            recordDiagnostic("waypoint_desvio_recalcular",{target={returnMoveGoal.X,returnMoveGoal.Y,returnMoveGoal.Z},
+                                position={current.X,current.Y,current.Z},lateral=lateral,heightError=math.abs(height-returnMoveGoal.Y)})
                         end
                         -- Nao retorna ao ponto ultrapassado; o laço avanca ou recalcula.
                         returnMoveGoal=nil
@@ -2964,8 +2972,26 @@ local function runCollection(uid, model, rec)
                             incoming.Magnitude*0.25,outgoing.Magnitude*0.25)
                     end
                 end
+                local alreadyPassed=false
+                if returning and previousPoint and point.Action~=Enum.PathWaypointAction.Jump then
+                    local axis=Vector3.new(point.Position.X-previousPoint.Position.X,0,point.Position.Z-previousPoint.Position.Z)
+                    local offset=Vector3.new(root.Position.X-point.Position.X,0,root.Position.Z-point.Position.Z)
+                    if axis.Magnitude>0 and offset:Dot(axis.Unit)>=0 then
+                        local lateral=(offset-axis.Unit*offset:Dot(axis.Unit)).Magnitude
+                        if math.abs(root.Position.Y-point.Position.Y)<=verticalTolerance
+                            and lateral<=math.clamp(humanoid.WalkSpeed*0.1,6,36) then
+                            alreadyPassed=true
+                            if index==#waypoints then segmentReached=true end
+                            recordDiagnostic("waypoint_antigo_ignorado",{segment=segment,index=index,lateral=lateral})
+                        else
+                            returnRouteInvalid=true;prepared=nil;planId=planId+1
+                            recordDiagnostic("rota_antiga_descartada",{segment=segment,index=index,lateral=lateral})
+                            break
+                        end
+                    end
+                end
                 approachSpeed()
-                if not reached(point.Position,reachRadius) then
+                if not alreadyPassed and not reached(point.Position,reachRadius) then
                     if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
                     collectionMessage(string.format((returning and "Voltando" or "Indo")..": trecho %d | ponto %d/%d | faltam %.0f studs",
                         segment,index,#waypoints,flatDistance(root.Position,target)))
