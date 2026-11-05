@@ -1972,6 +1972,16 @@ do
             lines[#lines+1]="Personagem: "..pos(target.character)
             lines[#lines+1]=string.format("Registro atual: %s | candidatos aceitos: %d | prompts examinados: %d",
                 tostring(target.hasCurrentRecord),data.promptAccepted or 0,data.promptExamined or 0)
+            if data.carry then
+                lines[#lines+1]="Posse pelo UID: "..tostring(data.carry.confirmed)
+                    .." | alvo: "..tostring(data.carry.targetUid)
+                if data.carry.acquired then lines[#lines+1]="UID carregado: "..tostring(data.carry.acquired.uid) end
+                if data.carry.failure then lines[#lines+1]="Falha de posse: "..tostring(data.carry.failure) end
+                if data.carry.stopped then
+                    local position=data.carry.stopped.position
+                    lines[#lines+1]=string.format("Deixou de carregar em: %.2f, %.2f, %.2f",position[1],position[2],position[3])
+                end
+            end
             if data.interaction then
                 local interaction=data.interaction
                 lines[#lines+1]=string.format("Interacao: visivel antes %s | apos AlwaysShow %s | hold iniciado %s | Triggered %s",
@@ -2237,6 +2247,9 @@ local function runCollection(uid, model, rec)
     local tripReturned = false
     local deliveryConfirmed = false
     local deliveryConnection=nil
+    local carryConnection=nil
+    local carryConfirmed=false
+    local interactionAttempted=false
     local diagnostics={uid=tostring(uid),events={},phase="preparando",maxFrame=0,
         longestSlow=0,maxPlanWait=0,phaseTime=os.clock()}
     local diagnosticConnection=nil
@@ -2263,8 +2276,46 @@ local function runCollection(uid, model, rec)
             and player.Character == character and root and root.Parent
             and humanoid and humanoid.Parent and humanoid.Health > 0
     end
+    local function readCarryState()
+        local state=modules.EggState
+        if not state or type(state.ReadCarryState)~="function" then return nil,"ReadCarryState indisponivel" end
+        local success,value=pcall(state.ReadCarryState)
+        if not success or type(value)~="table" then return nil,"Falha ao ler estado carregado" end
+        return value
+    end
+    local function carryDetails(state)
+        return {isCarrying=state.IsCarrying==true,uid=state.Uid and tostring(state.Uid) or nil,
+            category=state.AssetCategory,area=state.AreaId,speedMultiplier=state.SpeedMultiplier,
+            position={root.Position.X,root.Position.Y,root.Position.Z}}
+    end
     local ok, err = pcall(function()
         if not active() then error("personagem indisponivel", 0) end
+        local initialCarry,carryError=readCarryState()
+        if not initialCarry then error(carryError,0) end
+        if initialCarry.IsCarrying then error("Ja esta carregando um ovo; entregue antes de iniciar",0) end
+        diagnostics.carry={targetUid=tostring(uid),confirmed=false,initial=carryDetails(initialCarry)}
+        local lastCarrying=false
+        local lastUid=nil
+        local function observeCarry(state)
+            if not active() or type(state)~="table" then return end
+            local carrying=state.IsCarrying==true
+            local currentUid=state.Uid and tostring(state.Uid) or nil
+            if carrying~=lastCarrying or currentUid~=lastUid then
+                local details=carryDetails(state)
+                recordDiagnostic("carregamento_mudou",details)
+                diagnostics.carry.last=details
+                if carryConfirmed and lastCarrying and not carrying then
+                    diagnostics.carry.stopped=details
+                    recordDiagnostic("deixou_de_carregar",details)
+                end
+                lastCarrying=carrying;lastUid=currentUid
+            end
+        end
+        local state=modules.EggState
+        if state.CarryChanged then
+            local connected,connection=pcall(function() return state.CarryChanged:Connect(observeCarry) end)
+            if connected then carryConnection=connection end
+        end
         if root.Anchored or humanoid.WalkSpeed <= 0 then
             error("personagem imobilizado; saia da esteira antes do teste", 0)
         end
@@ -2302,6 +2353,8 @@ local function runCollection(uid, model, rec)
             deliveryElapsed=deliveryElapsed+dt
             if deliveryElapsed<0.1 or not active() then return end
             deliveryElapsed=0
+            local carried=readCarryState()
+            if carried then observeCarry(carried) end
             local current=deliveryMessages()
             for object,message in pairs(current) do
                 if not visibleMessages[object] and diagnostics.phase=="volta" then
@@ -2765,8 +2818,7 @@ local function runCollection(uid, model, rec)
         end
         restoreSpeed()
         collector.restoreSpeed=nil
-        if deliveryConnection then deliveryConnection:Disconnect();deliveryConnection=nil end
-    if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
+        if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
         return arrived, failure
         end -- walkTo: planejamento independente por perna da viagem
 
@@ -3063,6 +3115,7 @@ local function runCollection(uid, model, rec)
             outcome=count and count>1 and "Interacao ambigua; coleta nao tentada."
                 or "Sem prompt unico por identidade/BoundsCFrame; coleta bloqueada."
             if prompt then
+                interactionAttempted=true
                 local _,association=belongsToSelectedEgg(prompt)
                 recordDiagnostic("prompt_selecionado",{uid=tostring(uid),path=prompt:GetFullName(),association=association})
                 local triggered=false
@@ -3141,6 +3194,33 @@ local function runCollection(uid, model, rec)
             end
         end
         if not active() then return end
+        if interactionAttempted then
+            collectionMessage("Conferindo UID do ovo carregado...")
+            local carryDeadline=os.clock()+2
+            local carried,readError
+            repeat
+                carried,readError=readCarryState()
+                if carried then
+                    observeCarry(carried)
+                    if carried.IsCarrying then break end
+                end
+                game:GetService("RunService").Heartbeat:Wait()
+            until not active() or os.clock()>=carryDeadline
+            if not active() then return end
+            if not carried or not carried.IsCarrying then
+                diagnostics.carry.failure=readError or "posse nao confirmada"
+                error("Coleta sem confirmacao de posse; automatico interrompido",0)
+            end
+            diagnostics.carry.acquired=carryDetails(carried)
+            if tostring(carried.Uid)~=tostring(uid) then
+                diagnostics.carry.failure="UID diferente"
+                error("Ovo errado: alvo "..tostring(uid)..", carregado "..tostring(carried.Uid).."; automatico interrompido",0)
+            end
+            carryConfirmed=true
+            diagnostics.carry.confirmed=true
+            outcome="Posse confirmada pelo UID "..tostring(uid).."."
+            recordDiagnostic("posse_confirmada",carryDetails(carried))
+        end
         collectionMessage(outcome.." Voltando ao ponto de partida...")
         local returned,returnWhy=walkTo(returnTarget,true)
         tripReturned = returned and active()
@@ -3158,6 +3238,8 @@ local function runCollection(uid, model, rec)
         end
     end)
     if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
+    if deliveryConnection then deliveryConnection:Disconnect();deliveryConnection=nil end
+    if carryConnection then carryConnection:Disconnect();carryConnection=nil end
     collector.lastDiagnostics=diagnostics
     diagnostics.returned=tripReturned
     diagnostics.error=not ok and tostring(err) or nil
@@ -3184,7 +3266,7 @@ local function runCollection(uid, model, rec)
     collector.humanoid=nil
     collectorBusy=false
     if collector.automatic and collector.enabled and generation==collector.generation
-        and ok and tripReturned and deliveryConfirmed then
+        and ok and tripReturned and carryConfirmed and deliveryConfirmed then
         collector.finished=false
         -- Nao apaga renovacoes observadas enquanto a viagem estava em andamento.
         collectionMessage(collectionStatus.Text..(collector.pending
