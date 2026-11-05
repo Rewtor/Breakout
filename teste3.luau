@@ -2060,6 +2060,8 @@ local function runCollection(uid, model, rec)
     collector.generation = collector.generation + 1
     local generation = collector.generation
     local tripReturned = false
+    local deliveryConfirmed = false
+    local deliveryConnection=nil
     local diagnostics={uid=tostring(uid),events={},phase="preparando",maxFrame=0,
         longestSlow=0,maxPlanWait=0,phaseTime=os.clock()}
     local diagnosticConnection=nil
@@ -2094,6 +2096,50 @@ local function runCollection(uid, model, rec)
         local origin = root.Position
         local eggTarget = collectionDestination(model, rec)
         if not eggTarget then error("ovo sem posicao", 0) end
+        -- Continua para dentro da base; nao freia na fronteira de entrega.
+        local inward=Vector3.new(origin.X-eggTarget.X,0,origin.Z-eggTarget.Z)
+        local returnTarget=origin
+        if inward.Magnitude>1 then returnTarget=origin+inward.Unit*60 end
+        diagnostics.delivery={confirmed=false,returnTarget={returnTarget.X,returnTarget.Y,returnTarget.Z}}
+        -- Evidencia positiva do jogo, nunca apenas sumico de Drop/Triggered.
+        -- Ignora mensagens que ja estavam visiveis antes desta viagem.
+        local visibleMessages={}
+        local function deliveryMessages()
+            local found={}
+            for _,object in ipairs(host:GetDescendants()) do
+                if object:IsA("TextLabel") or object:IsA("TextButton") then
+                    local text=object.Text:lower():gsub("<[^>]->", "")
+                    if text:find("you stole an egg",1,true) then
+                        local visible=object.Visible
+                        local ancestor=object.Parent
+                        while visible and ancestor and ancestor~=host do
+                            if ancestor:IsA("GuiObject") and not ancestor.Visible then visible=false end
+                            if ancestor:IsA("ScreenGui") and not ancestor.Enabled then visible=false end
+                            ancestor=ancestor.Parent
+                        end
+                        if visible then found[object]=object.Text end
+                    end
+                end
+            end
+            return found
+        end
+        visibleMessages=deliveryMessages()
+        local deliveryElapsed=0
+        deliveryConnection=game:GetService("RunService").Heartbeat:Connect(function(dt)
+            deliveryElapsed=deliveryElapsed+dt
+            if deliveryElapsed<0.1 or not active() then return end
+            deliveryElapsed=0
+            local current=deliveryMessages()
+            for object,message in pairs(current) do
+                if not visibleMessages[object] and diagnostics.phase=="volta" then
+                    deliveryConfirmed=true
+                    diagnostics.delivery.confirmed=true
+                    diagnostics.delivery.message=message
+                    recordDiagnostic("entrega_confirmada",{message=message})
+                end
+            end
+            visibleMessages=current
+        end)
         local returnSeed=nil
         local function walkTo(target, returning)
         diagnostics.phase=returning and "volta" or "ida"
@@ -2519,7 +2565,8 @@ local function runCollection(uid, model, rec)
         end
         restoreSpeed()
         collector.restoreSpeed=nil
-        if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
+        if deliveryConnection then deliveryConnection:Disconnect();deliveryConnection=nil end
+    if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
         return arrived, failure
         end -- walkTo: planejamento independente por perna da viagem
 
@@ -2843,11 +2890,19 @@ local function runCollection(uid, model, rec)
         end
         if not active() then return end
         collectionMessage(outcome.." Voltando ao ponto de partida...")
-        local returned,returnWhy=walkTo(origin,true)
+        local returned,returnWhy=walkTo(returnTarget,true)
         tripReturned = returned and active()
+        if returned and active() and not deliveryConfirmed then
+            collectionMessage("Dentro da base: aguardando confirmacao de entrega...")
+            local confirmationDeadline=os.clock()+2
+            while active() and not deliveryConfirmed and os.clock()<confirmationDeadline do
+                game:GetService("RunService").Heartbeat:Wait()
+            end
+        end
         if active() then
-            collectionMessage(outcome..(returned and " Retorno ao ponto concluido; entrega do ovo nao verificada."
-                or " Retorno interrompido: "..tostring(returnWhy)))
+            collectionMessage(deliveryConfirmed and "Entrega confirmada pelo jogo."
+                or (returned and "Retorno concluido, mas entrega NAO confirmada. Automatico sera interrompido."
+                or "Retorno interrompido: "..tostring(returnWhy)))
         end
     end)
     if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
@@ -2877,7 +2932,7 @@ local function runCollection(uid, model, rec)
     collector.humanoid=nil
     collectorBusy=false
     if collector.automatic and collector.enabled and generation==collector.generation
-        and ok and tripReturned then
+        and ok and tripReturned and deliveryConfirmed then
         collector.finished=false
         -- Nao apaga renovacoes observadas enquanto a viagem estava em andamento.
         collectionMessage(collectionStatus.Text..(collector.pending
@@ -2888,7 +2943,7 @@ local function runCollection(uid, model, rec)
         collector.pending=false
         if collector.automatic and collector.enabled then
             collector.enabled=false
-            collectionMessage(collectionStatus.Text.." Automatico desligado: viagem nao concluida.")
+            collectionMessage(collectionStatus.Text.." Automatico desligado: retorno ou entrega sem confirmacao.")
         end
     end
     if alive and generation==collector.generation then
