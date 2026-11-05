@@ -2038,6 +2038,8 @@ local function runCollection(uid, model, rec)
         end
         collector.restoreSpeed=restoreSpeed
         local function approachSpeed()
+            -- Na volta, preserva a velocidade do jogo ate chegar ao ponto salvo.
+            if returning then return end
             if appliedSpeed and humanoid.WalkSpeed~=appliedSpeed then
                 normalSpeed=humanoid.WalkSpeed
                 appliedSpeed=nil
@@ -2049,8 +2051,7 @@ local function runCollection(uid, model, rec)
             local distance=flatDistance(root.Position,target)
             local brakeDistance=math.max(30,math.max(normalSpeed,actual)*0.45+20)
             if distance<brakeDistance and normalSpeed>12 then
-                local minimum=returning and 12 or 2
-                local limit=math.min(normalSpeed,math.max(minimum,math.sqrt(160*math.max(distance-arrivalRadius,0))))
+                local limit=math.min(normalSpeed,math.max(2,math.sqrt(160*math.max(distance-arrivalRadius,0))))
                 humanoid.WalkSpeed=limit
                 appliedSpeed=limit
             else
@@ -2245,7 +2246,7 @@ local function runCollection(uid, model, rec)
                 arrived,failure=centerOnEgg()
                 break
             end
-            if reached(target,arrivalRadius) and settleAt(target,arrivalRadius) then
+            if reached(target,arrivalRadius) and (returning or settleAt(target,arrivalRadius)) then
                 arrived=true;break
             end
             local segmentStart=root.Position
@@ -2355,7 +2356,7 @@ local function runCollection(uid, model, rec)
                     or reached(target,arrivalRadius) then
                     local stopPoint=target
                     local stopRadius=arrivalRadius
-                    if settleAt(stopPoint,stopRadius) then arrived=true;break end
+                    if returning or settleAt(stopPoint,stopRadius) then arrived=true;break end
                     failure="Drift afastou do destino; corrigindo aproximacao"
                     -- Recalcula a aproximacao se deslizou; nao inicia coleta nem volta ainda.
                 end
