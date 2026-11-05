@@ -27,7 +27,7 @@ local SCAN_INTERVAL = 1.5
 local GEOMETRY_TTL = 60
 local CONFIG_FILE = "DiceRadar_Config.json"
 local DEFAULT_POSITION = Vector3.new(519.82, 71.85, -364.44)
-local BUILD_ID = "return-plane-v2"
+local BUILD_ID = "return-forward-prefix-v3"
 
 local function finite(value)
     local n = tonumber(value)
@@ -2947,12 +2947,64 @@ local function runCollection(uid, model, rec)
                     end
                 end)
             end
+            local firstWaypoint=(#waypoints>1) and 2 or 1
+            if returning and returnDirection.Magnitude>0 then
+                local position=root.Position
+                local first=waypoints[firstWaypoint]
+                local function horizontalOffset(point)
+                    return Vector3.new(point.X-position.X,0,point.Z-position.Z)
+                end
+                local offset=first and horizontalOffset(first.Position)
+                -- ComputeAsync pode terminar quando os primeiros pontos ja ficaram atras.
+                if offset and offset.Magnitude>3 and offset.Unit:Dot(returnDirection)<-0.15
+                    and offset.Magnitude<=math.max(40,humanoid.WalkSpeed*0.5) then
+                    local forwardIndex=nil
+                    for index=firstWaypoint,#waypoints do
+                        local point=waypoints[index]
+                        if point.Action==Enum.PathWaypointAction.Jump then break end
+                        local delta=horizontalOffset(point.Position)
+                        if delta.Magnitude>3 and delta.Unit:Dot(returnDirection)>0.15
+                            and math.abs(point.Position.Y-position.Y)<=verticalTolerance then
+                            forwardIndex=index;break
+                        end
+                    end
+                    local clear=forwardIndex~=nil
+                    if clear then
+                        local delta=horizontalOffset(waypoints[forwardIndex].Position)
+                        local side=Vector3.new(-delta.Z,0,delta.X).Unit*2
+                        for _,shift in ipairs({Vector3.zero,side,-side}) do
+                            if Workspace:Raycast(position+shift,delta,params) then clear=false;break end
+                        end
+                        -- Nao encurta por cima de buracos ou desniveis incompatíveis.
+                        if clear then
+                            for distance=0,delta.Magnitude,12 do
+                                local sample=position+delta.Unit*distance
+                                local ground=Workspace:Raycast(sample+Vector3.new(0,8,0),Vector3.new(0,-24,0),params)
+                                if not ground or ground.Normal.Y<0.6
+                                    or math.abs(ground.Position.Y-(position.Y-humanoid.HipHeight-root.Size.Y/2))>6 then
+                                    clear=false;break
+                                end
+                            end
+                        end
+                    end
+                    if clear then
+                        firstWaypoint=forwardIndex
+                        recordDiagnostic("prefixo_atras_descartado",{segment=segment,nextIndex=firstWaypoint,
+                            alignment=offset.Unit:Dot(returnDirection),distance=offset.Magnitude})
+                    else
+                        -- Nunca gira para um prefixo velho enquanto outro trajeto e calculado.
+                        returnRouteInvalid=true;prepared=nil;planId=planId+1
+                        recordDiagnostic("prefixo_atras_recalcular",{segment=segment,distance=offset.Magnitude})
+                    end
+                end
+            end
             -- O primeiro ponto e a origem do calculo, nao um destino para voltar.
             -- Preserva uma eventual acao de salto na origem.
             if waypoints[1] and waypoints[1].Action==Enum.PathWaypointAction.Jump then
                 humanoid.Jump=true
             end
-            for index=(#waypoints>1) and 2 or 1,#waypoints do
+            for index=firstWaypoint,#waypoints do
+                if returnRouteInvalid then break end
                 local point=waypoints[index]
                 if not active() or os.clock()>=deadline then break end
                 if updateReturnCrossing() then segmentReached=true;break end
