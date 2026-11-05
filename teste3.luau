@@ -1949,7 +1949,7 @@ stopCollection = function()
     -- Busy so e liberado quando o worker antigo terminar.
     collectionMessage("Caminhada cancelada.")
 end
-addButton("Coletar ovo mais caro e voltar", function()
+local function startCollection(mode)
     if collectorBusy then
         collectionMessage("Caminhada em andamento; cancele antes de iniciar outra.")
         return
@@ -1958,6 +1958,7 @@ addButton("Coletar ovo mais caro e voltar", function()
         collectionMessage("Cancele a busca de servidor antes do teste.")
         return
     end
+    collector.mode = mode
     collector.enabled = true
     collector.finished = false
     table.clear(collector.seen)
@@ -1966,8 +1967,10 @@ addButton("Coletar ovo mais caro e voltar", function()
     collector.startedAt = os.clock()
     collector.changedAt = os.clock()
     collectionMessage("Ida e volta: aguardando os ovos carregarem...")
-end)
-addButton("Cancelar caminhada", stopCollection)
+end
+addButton("Coletar ovo mais caro e voltar", function() startCollection("walk") end)
+addButton("TESTAR: teleportar, coletar e voltar andando", function() startCollection("teleport") end)
+addButton("Cancelar viagem", stopCollection)
 
 -- Posicao do registro, com alternativa pelo modelo visual.
 local function collectionDestination(model, rec)
@@ -1979,7 +1982,7 @@ local function collectionDestination(model, rec)
     return part and part.Position or nil
 end
 
--- Somente caminhada: nenhuma alteracao de CFrame, velocidade ou portal.
+-- Ida selecionavel; retorno sempre andando. Teleporte experimental de uma tentativa.
 local function runCollection(uid, model, rec)
     collectorBusy = true
     collector.generation = collector.generation + 1
@@ -2220,7 +2223,62 @@ local function runCollection(uid, model, rec)
             for prompt in pairs(candidates) do selected=prompt;count=count+1 end
             return count==1 and selected or nil, count
         end
-        local arrived,why=walkTo(eggTarget,false)
+        local function teleportOutbound()
+            collectionMessage("Teleporte: procurando chao livre perto do ovo...")
+            local params=RaycastParams.new()
+            params.FilterType=Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances=model and {character,model} or {character}
+            params.RespectCanCollide=true
+            local overlap=OverlapParams.new()
+            overlap.FilterType=Enum.RaycastFilterType.Exclude
+            overlap.FilterDescendantsInstances={character}
+            overlap.RespectCanCollide=true
+            local landing
+            for _,radius in ipairs({5,8,11}) do
+                for i=0,7 do
+                    if not active() then return false,"cancelado" end
+                    local angle=i*math.pi/4
+                    local sample=eggTarget+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius)
+                    local hit=Workspace:Raycast(sample+Vector3.new(0,24,0),Vector3.new(0,-100,0),params)
+                    if hit and hit.Normal.Y>=0.8 and math.abs(hit.Position.Y-eggTarget.Y)<=8 then
+                        local height=math.max(3,humanoid.HipHeight+root.Size.Y/2)
+                        local position=hit.Position+Vector3.new(0,height+0.25,0)
+                        local clearance=Vector3.new(math.max(4,root.Size.X+1),height*2-0.5,math.max(3,root.Size.Z+1))
+                        if #Workspace:GetPartBoundsInBox(CFrame.new(position),clearance,overlap)==0 then
+                            landing=position;break
+                        end
+                    end
+                end
+                if landing then break end
+            end
+            if not landing then return false,"sem chao livre/carregado perto do ovo" end
+            if not active() then return false,"cancelado" end
+            humanoid:MoveTo(root.Position)
+            local desiredRoot=CFrame.lookAt(landing,Vector3.new(eggTarget.X,landing.Y,eggTarget.Z))
+            local rootToPivot=root.CFrame:ToObjectSpace(character:GetPivot())
+            character:PivotTo(desiredRoot*rootToPivot)
+            humanoid:MoveTo(landing)
+            collectionMessage("Teleporte realizado: verificando permanencia perto do ovo...")
+            local deadline=os.clock()+1.5
+            repeat
+                task.wait(0.05)
+                if not active() then return false,"personagem indisponivel ou cancelado" end
+                if (root.Position-landing).Magnitude>15 then
+                    return false,"personagem afastado do destino; possivel correcao do servidor"
+                end
+            until os.clock()>=deadline
+            return true
+        end
+        local arrived,why
+        if collector.mode=="teleport" then
+            arrived,why=teleportOutbound()
+            if not arrived then
+                if active() then collectionMessage("Teste de teleporte encerrado: "..tostring(why)) end
+                return
+            end
+        else
+            arrived,why=walkTo(eggTarget,false)
+        end
         if not active() then return end
         local outcome="Ida interrompida: "..tostring(why)
         if arrived then
