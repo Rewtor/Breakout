@@ -2073,7 +2073,7 @@ local function runCollection(uid, model, rec)
                         collectionMessage(string.format("Trecho %d: calculando %d studs | faltam %.0f ate o ovo",
                             segment,math.floor((start-goal).Magnitude),flatDistance(start,target)))
                         path=game:GetService("PathfindingService"):CreatePath({
-                            AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=4,
+                            AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=12,
                         })
                         local computed,detail=pcall(function() path:ComputeAsync(start,goal) end)
                         if not active() then break end
@@ -2095,21 +2095,34 @@ local function runCollection(uid, model, rec)
             for index,point in ipairs(waypoints) do
                 if not active() or os.clock()>=deadline then break end
                 if reached(selectedGoal,3) then break end
-                if not reached(point.Position,2.5) then
+                -- Antecipa o proximo destino em retas; conserva precisao nas curvas/pulos.
+                local reachRadius=2.5
+                local nextPoint=waypoints[index+1]
+                local previousPoint=waypoints[index-1]
+                if nextPoint and previousPoint and point.Action~=Enum.PathWaypointAction.Jump
+                    and nextPoint.Action~=Enum.PathWaypointAction.Jump then
+                    local incoming=point.Position-previousPoint.Position
+                    local outgoing=nextPoint.Position-point.Position
+                    if incoming.Magnitude>0 and outgoing.Magnitude>0
+                        and incoming.Unit:Dot(outgoing.Unit)>0.95 then
+                        reachRadius=math.clamp(humanoid.WalkSpeed*0.2,3,6)
+                    end
+                end
+                if not reached(point.Position,reachRadius) then
                     if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
                     collectionMessage(string.format("Andando: trecho %d | ponto %d/%d | faltam %.0f studs",
                         segment,index,#waypoints,flatDistance(root.Position,target)))
                     humanoid:MoveTo(point.Position)
                     local timeout=math.min(deadline,os.clock()+8)
-                    local nextMove=os.clock()+1
+                    local nextMove=os.clock()+0.2
                     local startPosition=root.Position
-                    while active() and os.clock()<timeout and not reached(point.Position,2.5) do
+                    while active() and os.clock()<timeout and not reached(point.Position,reachRadius) do
                         if reached(selectedGoal,3) then break end
-                        if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+1 end
-                        task.wait(0.1)
+                        if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+0.2 end
+                        task.wait(0.05)
                     end
                     if not active() or reached(selectedGoal,3) then break end
-                    if not reached(point.Position,2.5) then
+                    if not reached(point.Position,reachRadius) then
                         failure=string.format("TRAVOU no trecho %d, ponto %d/%d | andou %.1f studs | estado %s",
                             segment,index,#waypoints,flatDistance(root.Position,startPosition),tostring(humanoid:GetState()))
                         break
