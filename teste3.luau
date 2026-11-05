@@ -2001,46 +2001,103 @@ local function runCollection(uid, model, rec)
         end
         local target = collectionDestination(model, rec)
         if not target then error("ovo sem posicao", 0) end
-        local function nearTarget()
-            local delta = root.Position-target
-            return Vector3.new(delta.X,0,delta.Z).Magnitude <= 6 and math.abs(delta.Y)<=8
+        local function flatDistance(a,b)
+            local d=a-b
+            return Vector3.new(d.X,0,d.Z).Magnitude
         end
-        local deadline = os.clock()+120
-        local arrived = false
-        for attempt=1,4 do
+        -- Waypoints ficam no chao; a raiz do personagem fica acima deles.
+        local verticalTolerance=math.max(6,humanoid.HipHeight+root.Size.Y/2+3)
+        local function reached(point, radius)
+            return flatDistance(root.Position,point)<=radius
+                and math.abs(root.Position.Y-point.Y)<=verticalTolerance
+        end
+        local params=RaycastParams.new()
+        params.FilterType=Enum.RaycastFilterType.Exclude
+        local excluded={character}
+        if model then excluded[#excluded+1]=model end
+        params.FilterDescendantsInstances=excluded
+        params.RespectCanCollide=true
+        local goals={}
+        for _,radius in ipairs({5,9}) do
+            for i=0,7 do
+                local angle=i*math.pi/4
+                local sample=target+Vector3.new(math.cos(angle)*radius,12,math.sin(angle)*radius)
+                local hit=Workspace:Raycast(sample,Vector3.new(0,-60,0),params)
+                if hit and hit.Normal.Y>=0.6 then goals[#goals+1]=hit.Position end
+            end
+        end
+        if #goals==0 then
+            error(string.format("CHAO AUSENTE perto do ovo | distancia %.0f studs | alvo Y %.1f | personagem Y %.1f",
+                (root.Position-target).Magnitude,target.Y,root.Position.Y),0)
+        end
+        table.sort(goals,function(a,b) return (root.Position-a).Magnitude<(root.Position-b).Magnitude end)
+        local initialDistance=(root.Position-target).Magnitude
+        local deadline=os.clock()+math.clamp(initialDistance/math.max(humanoid.WalkSpeed,1)*2+30,60,300)
+        local arrived=false
+        local failure="nenhuma rota calculada"
+        local selectedGoal
+        for round=1,3 do
             if not active() or os.clock()>=deadline then break end
-            if nearTarget() then arrived=true;break end
-            collectionMessage("Andando ate "..tostring(cached[uid] and cached[uid].C or uid)
-                .." | rota "..attempt.."/4")
-            path=game:GetService("PathfindingService"):CreatePath({
-                AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=4,
-            })
-            local computed=pcall(function() path:ComputeAsync(root.Position,target) end)
-            if not active() then break end
-            if computed and path.Status==Enum.PathStatus.Success then
-                for _,point in ipairs(path:GetWaypoints()) do
-                    if not active() or os.clock()>=deadline then break end
-                    if nearTarget() then arrived=true;break end
-                    if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
-                    humanoid:MoveTo(point.Position)
-                    local timeout=math.min(deadline,os.clock()+6)
-                    while active() and os.clock()<timeout
-                        and (root.Position-point.Position).Magnitude>3 do
-                        if nearTarget() then arrived=true;break end
-                        task.wait(0.1)
-                    end
-                    if arrived or not active() or (root.Position-point.Position).Magnitude>3 then break end
+            local waypoints
+            for index,goal in ipairs(goals) do
+                if not active() or os.clock()>=deadline then break end
+                if reached(goal,3) then arrived=true;selectedGoal=goal;break end
+                collectionMessage(string.format("Calculando rota %d/3, acesso %d/%d | %.0f studs",round,index,#goals,(root.Position-goal).Magnitude))
+                path=game:GetService("PathfindingService"):CreatePath({
+                    AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=4,
+                })
+                local computed,detail=pcall(function() path:ComputeAsync(root.Position,goal) end)
+                if not active() then break end
+                if computed and path.Status==Enum.PathStatus.Success then
+                    waypoints=path:GetWaypoints()
+                    selectedGoal=goal
+                    path:Destroy();path=nil
+                    if #waypoints>0 then break end
+                    failure="ROTA VAZIA"
+                    waypoints=nil
+                else
+                    failure=computed and ("SEM ROTA: "..tostring(path.Status))
+                        or ("ERRO AO CALCULAR: "..tostring(detail))
+                    path:Destroy();path=nil
                 end
             end
-            path:Destroy();path=nil
-            if active() and nearTarget() then arrived=true end
+            if arrived or not active() then break end
+            if not waypoints then break end
+            for index,point in ipairs(waypoints) do
+                if not active() or os.clock()>=deadline then break end
+                if reached(selectedGoal,3) then arrived=true;break end
+                if not reached(point.Position,2.5) then
+                    if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
+                    collectionMessage(string.format("Andando: ponto %d/%d | faltam %.0f studs",index,#waypoints,flatDistance(root.Position,selectedGoal)))
+                    humanoid:MoveTo(point.Position)
+                    local timeout=math.min(deadline,os.clock()+8)
+                    local nextMove=os.clock()+1
+                    local startPosition=root.Position
+                    while active() and os.clock()<timeout and not reached(point.Position,2.5) do
+                        if reached(selectedGoal,3) then arrived=true;break end
+                        if os.clock()>=nextMove then
+                            humanoid:MoveTo(point.Position)
+                            nextMove=os.clock()+1
+                        end
+                        task.wait(0.1)
+                    end
+                    if arrived or not active() then break end
+                    if not reached(point.Position,2.5) then
+                        failure=string.format("TRAVOU no ponto %d/%d | andou %.1f studs | falta %.1f | altura %.1f | estado %s",
+                            index,#waypoints,flatDistance(root.Position,startPosition),flatDistance(root.Position,point.Position),
+                            root.Position.Y-point.Position.Y,tostring(humanoid:GetState()))
+                        break
+                    end
+                end
+            end
+            if active() and reached(selectedGoal,3) then arrived=true end
             if arrived then break end
-            if active() then task.wait(0.3) end
         end
         if active() then
+            if not arrived and os.clock()>=deadline then failure="TEMPO TOTAL ESGOTADO | "..failure end
             collectionMessage(arrived
                 and "Chegou perto do ovo. Teste encerrado: sem coletar e sem retornar."
-                or "Nao foi possivel chegar andando; rota bloqueada ou tempo esgotado.")
+                or failure)
         elseif alive and generation==collector.generation then
             collectionMessage("Teste interrompido: personagem morreu, mudou ou radar foi pausado.")
         end
