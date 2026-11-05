@@ -1991,6 +1991,18 @@ local function runCollection(uid, model, rec)
     collector.generation = collector.generation + 1
     local generation = collector.generation
     local tripReturned = false
+    local diagnostics={uid=tostring(uid),events={},phase="preparando",maxFrame=0,
+        longestSlow=0,maxPlanWait=0,phaseTime=os.clock()}
+    local diagnosticConnection=nil
+    local slowSince=nil
+    local lastSlowReport=0
+    local lastState=nil
+    local lastWalkSpeed=nil
+    local function recordDiagnostic(kind,details)
+        if #diagnostics.events>=160 then table.remove(diagnostics.events,1) end
+        diagnostics.events[#diagnostics.events+1]={time=os.clock()-diagnostics.phaseTime,
+            phase=diagnostics.phase,kind=kind,details=details}
+    end
     local character = player.Character
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -2015,6 +2027,39 @@ local function runCollection(uid, model, rec)
         if not eggTarget then error("ovo sem posicao", 0) end
         local returnSeed=nil
         local function walkTo(target, returning)
+        diagnostics.phase=returning and "volta" or "ida"
+        recordDiagnostic("inicio",{target={target.X,target.Y,target.Z},walkSpeed=humanoid.WalkSpeed})
+        if returning then
+            diagnosticConnection=game:GetService("RunService").Heartbeat:Connect(function(dt)
+                if not active() then return end
+                diagnostics.maxFrame=math.max(diagnostics.maxFrame,dt)
+                local velocity=root.AssemblyLinearVelocity
+                local actual=Vector3.new(velocity.X,0,velocity.Z).Magnitude
+                local expected=humanoid.WalkSpeed
+                local state=tostring(humanoid:GetState())
+                local now=os.clock()
+                if expected~=lastWalkSpeed then
+                    recordDiagnostic("walkspeed",{previous=lastWalkSpeed,current=expected,actual=actual})
+                    lastWalkSpeed=expected
+                end
+                if dt>0.12 then recordDiagnostic("intervalo_frame",{dt=dt,actual=actual,walkSpeed=expected}) end
+                if state~=lastState then
+                    recordDiagnostic("estado",{state=state,actual=actual,walkSpeed=expected})
+                    lastState=state
+                end
+                if expected>0 and actual<expected*0.25 then
+                    slowSince=slowSince or now
+                    diagnostics.longestSlow=math.max(diagnostics.longestSlow,now-slowSince)
+                    if now-slowSince>0.25 and now-lastSlowReport>1 then
+                        lastSlowReport=now
+                        recordDiagnostic("velocidade_baixa",{duration=now-slowSince,actual=actual,
+                            walkSpeed=expected,position={root.Position.X,root.Position.Y,root.Position.Z}})
+                    end
+                else
+                    slowSince=nil
+                end
+            end)
+        end
         -- X/Z do ovo; Y da raiz permanece na altura fisica do personagem.
         -- MoveTo cuida da rota; o centro usa controle continuo, sem offset.
         local arrivalRadius = returning and 3 or 0.03
@@ -2261,7 +2306,13 @@ local function runCollection(uid, model, rec)
                 collectionMessage(string.format("Calculando trecho %d | faltam %.0f studs",
                     segment,flatDistance(root.Position,target)))
                 local why
+                local calculationStarted=os.clock()
                 route,why=calculateRoute(root.Position,active)
+                if returning then
+                    local waited=os.clock()-calculationStarted
+                    diagnostics.maxPlanWait=math.max(diagnostics.maxPlanWait,waited)
+                    recordDiagnostic("espera_rota",{segment=segment,duration=waited,success=route~=nil})
+                end
                 if why then failure=why end
             end
             if not active() or not route then break end
@@ -2315,6 +2366,17 @@ local function runCollection(uid, model, rec)
                     collectionMessage(string.format((returning and "Voltando" or "Indo")..": trecho %d | ponto %d/%d | faltam %.0f studs",
                         segment,index,#waypoints,flatDistance(root.Position,target)))
                     humanoid:MoveTo(point.Position)
+                    if returning then
+                        local velocity=root.AssemblyLinearVelocity
+                        local offset=point.Position-root.Position
+                        local horizontal=Vector3.new(offset.X,0,offset.Z)
+                        local physical=Vector3.new(velocity.X,0,velocity.Z)
+                        recordDiagnostic("waypoint",{segment=segment,index=index,
+                            target={point.Position.X,point.Position.Y,point.Position.Z},
+                            walkSpeed=humanoid.WalkSpeed,actual=physical.Magnitude,
+                            alignment=horizontal.Magnitude>0 and physical.Magnitude>2
+                                and horizontal.Unit:Dot(physical.Unit) or nil})
+                    end
                     local timeout=math.min(deadline,os.clock()+8)
                     local nextMove=os.clock()+0.2
                     local startPosition=root.Position
@@ -2388,6 +2450,7 @@ local function runCollection(uid, model, rec)
         end
         restoreSpeed()
         collector.restoreSpeed=nil
+        if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
         return arrived, failure
         end -- walkTo: planejamento independente por perna da viagem
 
@@ -2492,9 +2555,16 @@ local function runCollection(uid, model, rec)
         local returned,returnWhy=walkTo(origin,true)
         tripReturned = returned and active()
         if active() then
-            collectionMessage(outcome..(returned and " Retorno concluido."
+            collectionMessage(outcome..(returned and " Retorno ao ponto concluido; entrega do ovo nao verificada."
                 or " Retorno interrompido: "..tostring(returnWhy)))
         end
+    end)
+    if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
+    collector.lastDiagnostics=diagnostics
+    diagnostics.returned=tripReturned
+    diagnostics.error=not ok and tostring(err) or nil
+    pcall(function()
+        if writefile then writefile("DiceRadar_UltimoTeste.json",Http:JSONEncode(diagnostics)) end
     end)
     if collector.restoreSpeed then collector.restoreSpeed();collector.restoreSpeed=nil end
     shownConnection:Disconnect()
@@ -2525,6 +2595,11 @@ local function runCollection(uid, model, rec)
             collector.enabled=false
             collectionMessage(collectionStatus.Text.." Automatico desligado: viagem nao concluida.")
         end
+    end
+    if alive and generation==collector.generation then
+        collectionMessage(collectionStatus.Text..string.format(
+            "\nDiagnostico volta: maior frame %.0f ms | baixa velocidade %.2f s | espera rota %.2f s",
+            diagnostics.maxFrame*1000,diagnostics.longestSlow,diagnostics.maxPlanWait))
     end
     lastValidEggTime=os.clock()
 end
