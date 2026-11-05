@@ -1950,7 +1950,8 @@ function promptAnchors.valid(binding,records,models)
     local record=records[binding.uid]
     return record and record.State~="Claimed" and typeof(record.BottomCFrame)=="CFrame"
         and (record.BottomCFrame.Position-binding.bottom).Magnitude<=0.05
-        and models[binding.uid]==binding.model and binding.model.Parent~=nil
+        -- Modelo visual pode nao estar carregado; UID + ancora continuam verificaveis.
+        and (binding.model==nil or (models[binding.uid]==binding.model and binding.model.Parent~=nil))
 end
 function promptAnchors.sample()
     local character=player.Character
@@ -1968,7 +1969,7 @@ function promptAnchors.sample()
         local matchCount=0
         if position then
             for eggUid,record in pairs(records) do
-                if record.State~="Claimed" and models[eggUid] and typeof(record.BottomCFrame)=="CFrame"
+                if record.State~="Claimed" and typeof(record.BottomCFrame)=="CFrame"
                     and (position-record.BottomCFrame.Position).Magnitude<=0.05 then
                     matchCount=matchCount+1;matchedUid=eggUid
                 end
@@ -3294,7 +3295,7 @@ local function runCollection(uid, model, rec)
             returnSeed=nil
             if staged and active() then
                 humanoid:MoveTo(root.Position)
-                collectionMessage("Aguardando modelo e ancora do ovo a distancia...")
+                collectionMessage("Aguardando ancora do ovo a distancia...")
                 local anchorDeadline=os.clock()+8
                 local ready=false
                 repeat
@@ -3310,13 +3311,14 @@ local function runCollection(uid, model, rec)
                     if ready then break end
                     task.wait(0.25)
                 until not active() or os.clock()>=anchorDeadline
-                diagnostics.preparation={modelAvailable=model~=nil,anchorReady=ready}
+                diagnostics.preparation={modelAvailable=model~=nil,anchorReady=ready,
+                    recordAvailable=rec~=nil,modelRequired=false}
                 recordDiagnostic("preparacao_ancora",diagnostics.preparation)
                 if ready and active() then
                     local finalTarget=refreshTarget(true)
                     if finalTarget then arrived,why=walkTo(finalTarget,false,refreshTarget)
                     else why="Alvo removido apos preparar a ancora" end
-                else why="Modelo/ancora nao confirmados no ponto de preparacao" end
+                else why="Ancora nao confirmada no ponto de preparacao" end
             else why=stageWhy end
         end
         if not active() then return end
