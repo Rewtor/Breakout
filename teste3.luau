@@ -2461,17 +2461,47 @@ local function runCollection(uid, model, rec)
             if parent:IsA("BasePart") then return parent.Position end
             if parent:IsA("Model") then return parent:GetPivot().Position end
         end
+        local function belongsToSelectedEgg(prompt)
+            if not prompt or not prompt.Parent then return false,"removido" end
+            if prompt.Name~="CarryAreaEgg" and prompt.Name~="StealPrompt" then
+                return false,"tipo diferente"
+            end
+            if rec and rec.State=="Claimed" then return false,"alvo indisponivel" end
+            local inside=model and model.Parent and prompt:IsDescendantOf(model)
+            local owner=prompt
+            local matched=false
+            while owner and owner~=Workspace do
+                for _,key in ipairs({"EggUid","HalloweenEggUid","UID","Uid"}) do
+                    local value=owner:GetAttribute(key)
+                    if value~=nil then
+                        if tostring(value)~=tostring(uid) then return false,"UID diferente" end
+                        matched=true
+                    end
+                end
+                if owner==model then break end
+                owner=owner.Parent
+            end
+            if inside then return true,"modelo do alvo" end
+            if matched then return true,"UID do alvo" end
+            return false,"sem vinculo com o alvo"
+        end
+        local promptPool=nil
         local function selectPrompt()
             local candidates={}
+            local rejected={}
+            local inspected={}
             local function add(prompt)
+                if inspected[prompt] then return end
+                inspected[prompt]=true
                 if not prompt:IsA("ProximityPrompt") or not prompt.Enabled then return end
+                if prompt.Name~="CarryAreaEgg" and prompt.Name~="StealPrompt" then return end
+                local belongs,reason=belongsToSelectedEgg(prompt)
+                if not belongs then
+                    rejected[#rejected+1]={path=prompt:GetFullName(),reason=reason}
+                    return
+                end
                 local position=promptPosition(prompt)
                 if not position or (root.Position-position).Magnitude>prompt.MaxActivationDistance then return end
-                local belongs=model and model.Parent and prompt:IsDescendantOf(model)
-                -- Prompts fora do modelo so sao aceitos se visiveis, de roubo e perto do alvo.
-                local eggPrompt=prompt.Name=="CarryAreaEgg" or prompt.Name=="StealPrompt"
-                if not belongs and not (shown[prompt] and eggPrompt
-                    and (position-eggTarget).Magnitude<=10) then return end
                 if prompt.RequiresLineOfSight then
                     local rayParams=RaycastParams.new()
                     rayParams.FilterType=Enum.RaycastFilterType.Exclude
@@ -2483,12 +2513,23 @@ local function runCollection(uid, model, rec)
                 end
                 candidates[prompt]=true
             end
+            -- Uma busca por chegada: nao depende de qual prompt a camera mostra.
+            if not promptPool then
+                promptPool={}
+                for _,item in ipairs(Workspace:GetDescendants()) do
+                    if item:IsA("ProximityPrompt") and (item.Name=="CarryAreaEgg" or item.Name=="StealPrompt") then
+                        promptPool[#promptPool+1]=item
+                    end
+                end
+            end
             if model and model.Parent then
                 for _,item in ipairs(model:GetDescendants()) do add(item) end
             end
             for prompt in pairs(shown) do add(prompt) end
+            for _,prompt in ipairs(promptPool) do if prompt.Parent then add(prompt) end end
             local selected,count=nil,0
             for prompt in pairs(candidates) do selected=prompt;count=count+1 end
+            diagnostics.promptRejected=rejected
             return count==1 and selected or nil, count
         end
         local arrived,why=walkTo(eggTarget,false)
@@ -2496,7 +2537,7 @@ local function runCollection(uid, model, rec)
         local outcome="Ida interrompida: "..tostring(why)
         if arrived then
             humanoid:MoveTo(root.Position)
-            collectionMessage("Perto do ovo: procurando interacao disponivel...")
+            collectionMessage("No centro: procurando prompt vinculado ao UID "..tostring(uid))
             local deadline=os.clock()+5
             local prompt,count
             repeat
@@ -2506,8 +2547,10 @@ local function runCollection(uid, model, rec)
             until os.clock()>=deadline
             if not active() then return end
             outcome=count and count>1 and "Interacao ambigua; coleta nao tentada."
-                or "Sem prompt do ovo ao alcance; coleta nao tentada."
+                or "Nenhum prompt vinculado ao UID do alvo no alcance; coleta bloqueada."
             if prompt then
+                local _,association=belongsToSelectedEgg(prompt)
+                recordDiagnostic("prompt_selecionado",{uid=tostring(uid),path=prompt:GetFullName(),association=association})
                 local triggered=false
                 local connection=prompt.Triggered:Connect(function(who)
                     if who==player then triggered=true end
@@ -2524,15 +2567,19 @@ local function runCollection(uid, model, rec)
                 end
                 collector.cleanup=cleanupInteraction
                 local interactionOK,interactionError=pcall(function()
-                    collectionMessage("Interagindo: "..prompt.Name.."...")
+                    local belongs,reason=belongsToSelectedEgg(prompt)
+                    if not belongs then error("Prompt perdeu vinculo com o alvo: "..reason,0) end
+                    collectionMessage("Interagindo com UID "..tostring(uid).." | "..prompt.Name)
                     if prompt.Name=="CarryAreaEgg" then prompt.HoldDuration=0 end
                     prompt:InputHoldBegin()
                     local holdUntil=os.clock()+prompt.HoldDuration
                     -- Mesmo com duracao zero, deixa o motor processar um frame.
                     game:GetService("RunService").Heartbeat:Wait()
+                    if not triggered and prompt.Parent and not belongsToSelectedEgg(prompt) then error("Vinculo do prompt mudou durante a interacao",0) end
                     while active() and not triggered and prompt.Parent and prompt.Enabled
                         and os.clock()<holdUntil do
                         game:GetService("RunService").Heartbeat:Wait()
+                        if not triggered and prompt.Parent and not belongsToSelectedEgg(prompt) then error("Vinculo do prompt mudou durante a interacao",0) end
                     end
                     prompt:InputHoldEnd()
                     local waitUntil=os.clock()+0.25
