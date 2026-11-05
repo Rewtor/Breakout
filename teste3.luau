@@ -2461,7 +2461,11 @@ local function runCollection(uid, model, rec)
             if parent:IsA("BasePart") then return parent.Position end
             if parent:IsA("Model") then return parent:GetPivot().Position end
         end
-        local function belongsToSelectedEgg(prompt)
+        local spatialChoice=nil
+        local spatialEggs={}
+        local promptPool=nil
+        local spatialMatch=nil
+        local function belongsToSelectedEgg(prompt,identityOnly)
             if not prompt or not prompt.Parent then return false,"removido" end
             if prompt.Name~="CarryAreaEgg" and prompt.Name~="StealPrompt" then
                 return false,"tipo diferente"
@@ -2483,13 +2487,48 @@ local function runCollection(uid, model, rec)
             end
             if inside then return true,"modelo do alvo" end
             if matched then return true,"UID do alvo" end
+            if not identityOnly and spatialMatch and prompt==spatialChoice then
+                return spatialMatch(prompt)
+            end
             return false,"sem vinculo com o alvo"
         end
-        local promptPool=nil
+        spatialMatch=function(prompt)
+            if prompt.Name~="CarryAreaEgg" then return false,"tipo sem associacao espacial" end
+            local position=promptPosition(prompt)
+            local targetPosition=spatialEggs[tostring(uid)]
+            if not position or not targetPosition then return false,"BoundsCFrame indisponivel" end
+            local targetDistance=(position-targetPosition).Magnitude
+            -- A margem somente rejeita empates/ruido; nao desloca o personagem.
+            local separation=0.25
+            if targetDistance>prompt.MaxActivationDistance then return false,"prompt distante do BoundsCFrame" end
+            local otherEggDistance=math.huge
+            for otherUid,otherPosition in pairs(spatialEggs) do
+                if otherUid~=tostring(uid) then
+                    otherEggDistance=math.min(otherEggDistance,(position-otherPosition).Magnitude)
+                end
+            end
+            if otherEggDistance-targetDistance<=separation then return false,"prompt mais perto de outro ovo ou empate" end
+            local otherPromptDistance=math.huge
+            for _,otherPrompt in ipairs(promptPool or {}) do
+                if otherPrompt~=prompt and otherPrompt.Parent and otherPrompt.Enabled
+                    and otherPrompt.Name=="CarryAreaEgg" then
+                    local otherPosition=promptPosition(otherPrompt)
+                    if otherPosition then
+                        otherPromptDistance=math.min(otherPromptDistance,(otherPosition-targetPosition).Magnitude)
+                    end
+                end
+            end
+            diagnostics.spatial={uid=tostring(uid),promptDistance=targetDistance,
+                otherPromptDistance=otherPromptDistance<math.huge and otherPromptDistance or nil,
+                otherEggDistance=otherEggDistance<math.huge and otherEggDistance or nil}
+            if otherPromptDistance-targetDistance<=separation then return false,"outro prompt mais perto do alvo ou empate" end
+            return true,"proximidade reciproca ao BoundsCFrame (experimental)"
+        end
         local function selectPrompt()
             local candidates={}
             local rejected={}
             local inspected={}
+            spatialChoice=nil
             local function add(prompt)
                 if inspected[prompt] then return end
                 inspected[prompt]=true
@@ -2522,6 +2561,29 @@ local function runCollection(uid, model, rec)
                     end
                 end
             end
+            -- Usa os registros atuais para comparar com TODOS os ovos, nao com
+            -- o ovo visivel na camera. Nao confunde BottomCFrame com BoundsCFrame.
+            local _,currentRecords=collectSources()
+            spatialEggs={}
+            for eggUid,eggRecord in pairs(currentRecords) do
+                if eggRecord.State~="Claimed" and typeof(eggRecord.BoundsCFrame)=="CFrame" then
+                    spatialEggs[tostring(eggUid)]=eggRecord.BoundsCFrame.Position
+                end
+            end
+            local targetPosition=spatialEggs[tostring(uid)]
+            local nearestDistance=math.huge
+            if targetPosition then
+                for _,prompt in ipairs(promptPool) do
+                    if prompt.Parent and prompt.Enabled and prompt.Name=="CarryAreaEgg" then
+                        local identified,reason=belongsToSelectedEgg(prompt,true)
+                        local position=promptPosition(prompt)
+                        if position and (identified or reason=="sem vinculo com o alvo") then
+                            local distance=(position-targetPosition).Magnitude
+                            if distance<nearestDistance then nearestDistance=distance;spatialChoice=prompt end
+                        end
+                    end
+                end
+            end
             if model and model.Parent then
                 for _,item in ipairs(model:GetDescendants()) do add(item) end
             end
@@ -2547,7 +2609,7 @@ local function runCollection(uid, model, rec)
             until os.clock()>=deadline
             if not active() then return end
             outcome=count and count>1 and "Interacao ambigua; coleta nao tentada."
-                or "Nenhum prompt vinculado ao UID do alvo no alcance; coleta bloqueada."
+                or "Sem prompt unico por identidade/BoundsCFrame; coleta bloqueada."
             if prompt then
                 local _,association=belongsToSelectedEgg(prompt)
                 recordDiagnostic("prompt_selecionado",{uid=tostring(uid),path=prompt:GetFullName(),association=association})
@@ -2592,7 +2654,7 @@ local function runCollection(uid, model, rec)
                 collector.cleanup=nil
                 collector.prompt=nil
                 outcome=interactionOK and (triggered
-                    and "Interacao acionada; posse do ovo nao confirmada."
+                    and ("Interacao acionada por "..association.."; posse do ovo nao confirmada.")
                     or "Interacao sem confirmacao; verifique a coleta.")
                     or "Falha na interacao: "..tostring(interactionError)
             end
