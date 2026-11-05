@@ -27,7 +27,7 @@ local SCAN_INTERVAL = 1.5
 local GEOMETRY_TTL = 60
 local CONFIG_FILE = "DiceRadar_Config.json"
 local DEFAULT_POSITION = Vector3.new(519.82, 71.85, -364.44)
-local BUILD_ID = "direct-destination-v1"
+local BUILD_ID = "direct-auto-filter-v2"
 
 local function finite(value)
     local n = tonumber(value)
@@ -2044,6 +2044,10 @@ do
             lines[#lines+1]="Personagem: "..pos(target.character)
             lines[#lines+1]=string.format("Registro atual: %s | candidatos aceitos: %d | prompts examinados: %d",
                 tostring(target.hasCurrentRecord),data.promptAccepted or 0,data.promptExamined or 0)
+            if data.filter and data.filter.required then
+                lines[#lines+1]="Filtro webhook: renda >= "..tostring(data.filter.minIncome)
+                    .." | tamanho >= "..tostring(data.filter.minSize).." | aprovado: "..tostring(data.filter.accepted)
+            end
             if data.preparation then
                 lines[#lines+1]="Preparacao: modelo "..tostring(data.preparation.modelAvailable)
                     .." | ancora "..tostring(data.preparation.anchorReady)
@@ -2128,7 +2132,7 @@ local function startCollection(automatic)
     collector.pending = true
     collector.startedAt = os.clock()
     collector.changedAt = os.clock()
-    collectionMessage(automatic and "Automatico ligado: aguardando os valores dos ovos..."
+    collectionMessage(automatic and "Automatico ligado: buscando ovos com rendimento e tamanho aprovados no filtro do webhook..."
         or "Ida e volta: aguardando os ovos carregarem...")
 end
 do
@@ -2490,6 +2494,12 @@ local function runCollection(uid, model, rec)
         end
         if root.Anchored or humanoid.WalkSpeed <= 0 then
             error("personagem imobilizado; saia da esteira antes do teste", 0)
+        end
+        diagnostics.automatic=collector.automatic==true
+        diagnostics.filter={required=collector.automatic==true,minIncome=cfg.I,minSize=cfg.S}
+        if collector.automatic and not isTarget(cached[uid]) then
+            diagnostics.filter.accepted=false
+            error("Alvo fora do filtro do webhook antes da partida",0)
         end
         local origin = DEFAULT_POSITION
         local eggTarget = collectionDestination(model, rec)
@@ -2983,6 +2993,18 @@ local function runCollection(uid, model, rec)
                     if not position or not prompt.Enabled or (root.Position-position).Magnitude>prompt.MaxActivationDistance then
                         error("Prompt indisponivel ou fora do alcance antes do hold",0)
                     end
+                    if collector.automatic then
+                        -- Releitura do mesmo predicado do webhook, imediatamente antes do hold.
+                        local currentModels,currentRecords=collectSources()
+                        local record=currentRecords[tostring(uid)]
+                        if not record or record.State=="Claimed" then error("Alvo indisponivel antes da coleta",0) end
+                        local updated,data=pcall(updateEgg,uid,currentModels[tostring(uid)],record,os.clock())
+                        local approved=updated and isTarget(data)==true
+                        diagnostics.filter={required=true,minIncome=cfg.I,minSize=cfg.S,accepted=approved,
+                            income=updated and data and data.R or nil,size=updated and data and data.CS or nil}
+                        recordDiagnostic("validacao_filtro_webhook",diagnostics.filter)
+                        if not approved then error("Alvo nao atende mais ao filtro do webhook; coleta bloqueada",0) end
+                    end
                     collectionMessage("Interagindo com UID "..tostring(uid).." | "..prompt.Name)
                     if prompt.Name=="CarryAreaEgg" then prompt.HoldDuration=0 end
                     prompt:InputHoldBegin()
@@ -3123,7 +3145,7 @@ local function updateCollection(models, records, all, now)
     if now - collector.changedAt < 3 and now - collector.startedAt < 12 then return end
     local bestUid, bestModel, bestRecord, bestRate
     local pendingData = false
-    local counts = {total=0, noModel=0, pending=0, missing=0, ambiguous=0, claimed=0, tried=0}
+    local counts = {total=0, noModel=0, pending=0, missing=0, ambiguous=0, claimed=0, tried=0, filtered=0}
     for uid in pairs(all) do
         counts.total = counts.total + 1
         local model, data, rec = models[uid], cached[uid], records[uid]
@@ -3137,6 +3159,8 @@ local function updateCollection(models, records, all, now)
         elseif not data or not data.Ready then
             counts.pending = counts.pending + 1
             pendingData = true
+        elseif collector.automatic and not isTarget(data) then
+            counts.filtered = counts.filtered + 1
         else
             if not bestRate or data.R > bestRate
                 or (data.R == bestRate and uid < bestUid) then
@@ -3152,8 +3176,8 @@ local function updateCollection(models, records, all, now)
     else
         -- Falta de dados nao consome o lote. Nova verificacao no proximo scan.
         collectionMessage(string.format(
-            "Aguardando: %d ovos | sem posicao: %d | renda pendente: %d\nColetados: %d | tentados: %d",
-            counts.total, counts.noModel, counts.pending, counts.claimed, counts.tried))
+            "Aguardando: %d ovos | sem posicao: %d | renda pendente: %d\nFora do filtro: %d | indisponiveis: %d | tentados: %d",
+            counts.total, counts.noModel, counts.pending, counts.filtered, counts.claimed, counts.tried))
     end
 end
 
