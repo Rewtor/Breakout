@@ -2013,6 +2013,7 @@ local function runCollection(uid, model, rec)
         local origin = root.Position
         local eggTarget = collectionDestination(model, rec)
         if not eggTarget then error("ovo sem posicao", 0) end
+        local returnSeed=nil
         local function walkTo(target, returning)
         local arrivalRadius = returning and 3 or 5
         local function flatDistance(a,b)
@@ -2142,6 +2143,11 @@ local function runCollection(uid, model, rec)
         local failure="nenhuma rota calculada"
         local stagnant=0
         local prepared=nil
+        if returning and returnSeed and reached(returnSeed.start,8) then
+            prepared={done=true,start=returnSeed.start,route=returnSeed}
+        end
+        returnSeed=nil
+        local lastRoute=nil
         local planId=0
         local function calculateRoute(start, valid)
             local reason="nenhuma rota calculada"
@@ -2195,6 +2201,7 @@ local function runCollection(uid, model, rec)
                 if why then failure=why end
             end
             if not active() or not route then break end
+            lastRoute=route
             local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
             local segmentReached=false
             if not finalLeg then
@@ -2290,6 +2297,25 @@ local function runCollection(uid, model, rec)
         end
         planId=planId+1
         if not arrived and os.clock()>=deadline then failure="TEMPO TOTAL ESGOTADO | "..failure end
+        -- Reaproveita somente um trecho sem saltos, acabado de percorrer.
+        -- Saltos podem ser assimetricos; nesses casos calcula a volta normalmente.
+        if arrived and not returning and lastRoute and reached(lastRoute.goal,8) then
+            local reversible=true
+            for _,point in ipairs(lastRoute.points) do
+                if point.Action==Enum.PathWaypointAction.Jump then reversible=false;break end
+            end
+            if reversible and #lastRoute.points>1 then
+                local points={{Position=root.Position,Action=Enum.PathWaypointAction.Walk}}
+                for i=#lastRoute.points-1,1,-1 do
+                    points[#points+1]=lastRoute.points[i]
+                end
+                local goal=points[#points].Position
+                if flatDistance(root.Position,goal)>4 then
+                    returnSeed={start=root.Position,goal=goal,points=points,
+                        final=flatDistance(goal,origin)<=3 and math.abs(goal.Y-origin.Y)<=verticalTolerance}
+                end
+            end
+        end
         restoreSpeed()
         collector.restoreSpeed=nil
         return arrived, failure
@@ -2368,13 +2394,19 @@ local function runCollection(uid, model, rec)
                     collectionMessage("Interagindo: "..prompt.Name.."...")
                     if prompt.Name=="CarryAreaEgg" then prompt.HoldDuration=0 end
                     prompt:InputHoldBegin()
-                    local holdUntil=os.clock()+prompt.HoldDuration+0.15
-                    while active() and prompt.Parent and prompt.Enabled and os.clock()<holdUntil do
-                        task.wait(0.05)
+                    local holdUntil=os.clock()+prompt.HoldDuration
+                    -- Mesmo com duracao zero, deixa o motor processar um frame.
+                    game:GetService("RunService").Heartbeat:Wait()
+                    while active() and not triggered and prompt.Parent and prompt.Enabled
+                        and os.clock()<holdUntil do
+                        game:GetService("RunService").Heartbeat:Wait()
                     end
                     prompt:InputHoldEnd()
-                    local waitUntil=os.clock()+2
-                    while active() and not triggered and os.clock()<waitUntil do task.wait(0.05) end
+                    local waitUntil=os.clock()+0.25
+                    while active() and not triggered and prompt.Parent and prompt.Enabled
+                        and os.clock()<waitUntil do
+                        game:GetService("RunService").Heartbeat:Wait()
+                    end
                 end)
                 cleanupInteraction()
                 collector.cleanup=nil
