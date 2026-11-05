@@ -2561,6 +2561,9 @@ local function runCollection(uid, model, rec)
             return returnCrossed
         end
         local returnMoveGoal=nil
+        local returnGoalCommand=nil
+        local returnGoalPassed=false
+        local returnRouteInvalid=false
         local returnDirection=Vector3.zero
         local previousReturnFrame=root.Position
         local motionBinding="DiceRadarReturn_"..tostring(generation)
@@ -2572,7 +2575,11 @@ local function runCollection(uid, model, rec)
             if humanoid.Parent then humanoid:Move(Vector3.zero,false) end
         end
         local function moveToward(point)
-            if returning then returnMoveGoal=point
+            if returning then
+                -- Renovar o comando nao pode reativar um waypoint ja cruzado.
+                if returnGoalCommand and (returnGoalCommand-point).Magnitude<0.01 then return end
+                returnGoalCommand=point;returnMoveGoal=point;returnGoalPassed=false
+                previousReturnFrame=root.Position
             else humanoid:MoveTo(point) end
         end
         if returning then
@@ -2592,7 +2599,16 @@ local function runCollection(uid, model, rec)
                     local crossed=t>=0 and t<=1 and (offset-delta*t).Magnitude<=3
                     local direction=Vector3.new(returnMoveGoal.X-current.X,0,returnMoveGoal.Z-current.Z)
                     if crossed or direction.Magnitude<=3 then
-                        -- Mantem a direcao enquanto o laço entrega o proximo waypoint.
+                        local height=previousReturnFrame.Y+(current.Y-previousReturnFrame.Y)*math.clamp(t,0,1)
+                        local tolerance=math.max(6,humanoid.HipHeight+root.Size.Y/2+3)
+                        if math.abs(height-returnMoveGoal.Y)<=tolerance then
+                            returnGoalPassed=true
+                        else
+                            returnRouteInvalid=true
+                            recordDiagnostic("waypoint_altura_incompativel",{target={returnMoveGoal.X,returnMoveGoal.Y,returnMoveGoal.Z},
+                                position={current.X,current.Y,current.Z}})
+                        end
+                        -- Nao retorna ao ponto ultrapassado; o laço avanca ou recalcula.
                         returnMoveGoal=nil
                     elseif direction.Magnitude>0 then returnDirection=direction.Unit end
                 end
@@ -2901,6 +2917,8 @@ local function runCollection(uid, model, rec)
             if updateReturnCrossing() then arrived=true;break end
             if not active() or not route then break end
             lastRoute=route
+            returnRouteInvalid=false
+            returnGoalCommand=nil;returnMoveGoal=nil;returnGoalPassed=false
             local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
             local goalRadius=finalLeg and (returning and arrivalRadius or 2.5) or 3
             local segmentReached=false
@@ -2969,14 +2987,33 @@ local function runCollection(uid, model, rec)
                     local previousPosition=root.Position
                     local progressPosition=root.Position
                     local progressTime=os.clock()
+                    local bestWaypointDistance=flatDistance(root.Position,point.Position)
+                    local closerTime=os.clock()
                     local passed=false
                     while active() and os.clock()<timeout and not passed and not reached(point.Position,reachRadius) do
                         if updateReturnCrossing() then segmentReached=true;break end
+                        if returning and returnRouteInvalid then
+                            prepared=nil;planId=planId+1;break
+                        end
+                        if returning and returnGoalPassed then
+                            passed=true
+                            if index==#waypoints then segmentReached=true end
+                            break
+                        end
                         approachSpeed()
                         if reached(selectedGoal,goalRadius) then segmentReached=true;break end
                         if os.clock()>=nextMove then moveToward(point.Position);nextMove=os.clock()+0.2 end
                         heartbeat:Wait()
                         local currentPosition=root.Position
+                        local waypointDistance=flatDistance(currentPosition,point.Position)
+                        if waypointDistance<bestWaypointDistance-1 then
+                            bestWaypointDistance=waypointDistance;closerTime=os.clock()
+                        elseif returning and os.clock()-closerTime>=1 then
+                            returnRouteInvalid=true;prepared=nil;planId=planId+1
+                            recordDiagnostic("recalculo_sem_aproximacao",{distance=waypointDistance,
+                                best=bestWaypointDistance,position={currentPosition.X,currentPosition.Y,currentPosition.Z}})
+                            break
+                        end
                         if flatDistance(currentPosition,progressPosition)>=1 then
                             progressPosition=currentPosition;progressTime=os.clock()
                         elseif os.clock()-progressTime>=0.75 then
@@ -3015,7 +3052,7 @@ local function runCollection(uid, model, rec)
                     end
                 end
             end
-            if active() and not targetMoved then
+            if active() and not targetMoved and not returnRouteInvalid then
                 if updateReturnCrossing() then arrived=true;break end
                 if not returning and finalLeg and reached(target,4) then
                     arrived,failure=centerOnEgg()
