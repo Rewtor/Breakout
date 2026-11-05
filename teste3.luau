@@ -27,7 +27,7 @@ local SCAN_INTERVAL = 1.5
 local GEOMETRY_TTL = 60
 local CONFIG_FILE = "DiceRadar_Config.json"
 local DEFAULT_POSITION = Vector3.new(519.82, 71.85, -364.44)
-local BUILD_ID = "direct-auto-filter-v2"
+local BUILD_ID = "direct-filter-farm-v3"
 
 local function finite(value)
     local n = tonumber(value)
@@ -1919,8 +1919,8 @@ local function updateEgg(uid, model, rec, now)
 end
 
 -- =========================================================
--- COLETA: VIAGEM MANUAL OU UMA VIAGEM POR RENOVACAO DETECTADA
--- Renovacao inferida por UIDs novos; nao e um evento oficial do jogo.
+-- COLETA: VIAGEM MANUAL OU FARM CONTINUO DOS OVOS APROVADOS
+-- O farm reavalia o lote apos cada entrega e espera novos alvos quando esgota.
 -- Posse conferida por ReadCarryState.Uid; remocao/Claimed nao prova entrega.
 -- =========================================================
 local collector = {
@@ -2132,7 +2132,7 @@ local function startCollection(automatic)
     collector.pending = true
     collector.startedAt = os.clock()
     collector.changedAt = os.clock()
-    collectionMessage(automatic and "Automatico ligado: buscando ovos com rendimento e tamanho aprovados no filtro do webhook..."
+    collectionMessage(automatic and "Farm ligado: buscando ovos com rendimento e tamanho aprovados no filtro do webhook..."
         or "Ida e volta: aguardando os ovos carregarem...")
 end
 do
@@ -2402,7 +2402,7 @@ addButton("Copiar diagnostico dos modulos de ovos/prompts",function()
         or "Clipboard/arquivo indisponiveis; diagnostico mantido nesta execucao."))
 end)
 addButton("Coletar ovo mais caro e voltar", function() startCollection(false) end)
-addButton("ATIVAR coleta automatica por renovacao", function() startCollection(true) end)
+addButton("ATIVAR farm continuo (filtro do webhook)", function() startCollection(true) end)
 addButton("DESLIGAR coleta / cancelar viagem", stopCollection)
 
 -- Posicao do registro, com alternativa pelo modelo visual.
@@ -3111,10 +3111,13 @@ local function runCollection(uid, model, rec)
     if collector.automatic and collector.enabled and generation==collector.generation
         and ok and tripReturned and carryConfirmed and deliveryConfirmed then
         collector.finished=false
-        -- Nao apaga renovacoes observadas enquanto a viagem estava em andamento.
-        collectionMessage(collectionStatus.Text..(collector.pending
-            and " Nova renovacao detectada; aguardando os dados."
-            or " Automatico ligado: aguardando renovacao dos ovos."))
+        -- Reavalia imediatamente os ovos restantes, sem esperar UIDs novos.
+        -- attempted preserva os UIDs ja tentados nesta sessao de farm.
+        collector.pending=true
+        if os.clock()-collector.changedAt>=3 then
+            collector.startedAt=os.clock()-12
+        end
+        collectionMessage(collectionStatus.Text.." Farm ligado: buscando o proximo ovo aprovado no filtro.")
     else
         collector.finished=true
         collector.pending=false
@@ -3174,7 +3177,7 @@ local function updateCollection(models, records, all, now)
         collectorBusy = true
         task.spawn(runCollection, bestUid, bestModel, bestRecord)
     else
-        -- Falta de dados nao consome o lote. Nova verificacao no proximo scan.
+        -- Sem candidato agora: continua verificando dados, novos ovos e filtros.
         collectionMessage(string.format(
             "Aguardando: %d ovos | sem posicao: %d | renda pendente: %d\nFora do filtro: %d | indisponiveis: %d | tentados: %d",
             counts.total, counts.noModel, counts.pending, counts.filtered, counts.claimed, counts.tried))
