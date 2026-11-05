@@ -2067,6 +2067,38 @@ local function runCollection(uid, model, rec)
             end)
             return goals,finalLeg
         end
+        local heartbeat=game:GetService("RunService").Heartbeat
+        -- Remove apenas pontos praticamente colineares; preserva curvas e saltos.
+        local function simplifyRoute(points)
+            if #points<3 then return points end
+            local result={points[1]}
+            for i=2,#points-1 do
+                local a,b,c=result[#result],points[i],points[i+1]
+                local ab,bc=b.Position-a.Position,c.Position-b.Position
+                local ac=c.Position-a.Position
+                local removable=false
+                if a.Action~=Enum.PathWaypointAction.Jump and b.Action~=Enum.PathWaypointAction.Jump
+                    and c.Action~=Enum.PathWaypointAction.Jump and ab.Magnitude>0 and bc.Magnitude>0
+                    and ac.Magnitude>0 and ab.Unit:Dot(bc.Unit)>0.9995 then
+                    local t=math.clamp(ab:Dot(ac)/ac:Dot(ac),0,1)
+                    removable=(b.Position-(a.Position+ac*t)).Magnitude<=0.05
+                end
+                if not removable then result[#result+1]=b end
+            end
+            result[#result+1]=points[#points]
+            return result
+        end
+        -- Considera o segmento percorrido entre frames, nao apenas a posicao final.
+        local function crossedPoint(previous,current,point,radius)
+            local delta=Vector3.new(current.X-previous.X,0,current.Z-previous.Z)
+            local offset=Vector3.new(point.X-previous.X,0,point.Z-previous.Z)
+            local lengthSquared=delta:Dot(delta)
+            if lengthSquared<0.0001 then return false end
+            local t=math.clamp(offset:Dot(delta)/lengthSquared,0,1)
+            local closest=previous+(current-previous)*t
+            return flatDistance(closest,point)<=radius
+                and math.abs(closest.Y-point.Y)<=verticalTolerance
+        end
         local initialDistance=(root.Position-target).Magnitude
         local deadline=os.clock()+math.clamp(initialDistance/math.max(humanoid.WalkSpeed,1)*3+60,120,1800)
         local arrived=false
@@ -2076,7 +2108,7 @@ local function runCollection(uid, model, rec)
         local planId=0
         local function calculateRoute(start, valid)
             local reason="nenhuma rota calculada"
-            for _,step in ipairs({200,100,50}) do
+            for _,step in ipairs({math.clamp(humanoid.WalkSpeed*0.75,200,280),100,50}) do
                 if not valid() or os.clock()>=deadline then return nil,reason end
                 local goals,isFinal=goalsFor(step,start)
                 if #goals==0 then reason="CHAO AUSENTE no proximo trecho" end
@@ -2096,7 +2128,7 @@ local function runCollection(uid, model, rec)
                         candidate:Destroy()
                         if not valid() then return nil,"calculo cancelado" end
                         if ok and #points>0 then
-                            return {start=start,goal=goal,points=points,final=isFinal}
+                            return {start=start,goal=goal,points=simplifyRoute(points),final=isFinal}
                         end
                         reason=ok and "ROTA VAZIA" or tostring(points)
                     end
@@ -2109,9 +2141,11 @@ local function runCollection(uid, model, rec)
             if reached(target,arrivalRadius) then arrived=true;break end
             local segmentStart=root.Position
             local route
+            local reused=false
             -- Usa o trecho pronto apenas se ainda estivermos na entrada prevista.
-            if prepared and prepared.done and prepared.route and reached(prepared.start,5) then
+            if prepared and prepared.done and prepared.route and reached(prepared.start,math.clamp(humanoid.WalkSpeed/60+3,5,12)) then
                 route=prepared.route
+                reused=true
             end
             planId=planId+1
             prepared=nil
@@ -2140,7 +2174,8 @@ local function runCollection(uid, model, rec)
                     end
                 end)
             end
-            for index,point in ipairs(waypoints) do
+            for index=(reused and #waypoints>1) and 2 or 1,#waypoints do
+                local point=waypoints[index]
                 if not active() or os.clock()>=deadline then break end
                 if reached(selectedGoal,3) then break end
                 -- Antecipa o proximo destino em retas; conserva precisao nas curvas/pulos.
@@ -2153,7 +2188,8 @@ local function runCollection(uid, model, rec)
                     local outgoing=nextPoint.Position-point.Position
                     if incoming.Magnitude>0 and outgoing.Magnitude>0
                         and incoming.Unit:Dot(outgoing.Unit)>0.95 then
-                        reachRadius=math.clamp(humanoid.WalkSpeed*0.2,3,6)
+                        reachRadius=math.min(math.clamp(humanoid.WalkSpeed*0.06,3,18),
+                            incoming.Magnitude*0.25,outgoing.Magnitude*0.25)
                     end
                 end
                 if not reached(point.Position,reachRadius) then
@@ -2164,13 +2200,21 @@ local function runCollection(uid, model, rec)
                     local timeout=math.min(deadline,os.clock()+8)
                     local nextMove=os.clock()+0.2
                     local startPosition=root.Position
-                    while active() and os.clock()<timeout and not reached(point.Position,reachRadius) do
+                    local previousPosition=root.Position
+                    local passed=false
+                    while active() and os.clock()<timeout and not passed and not reached(point.Position,reachRadius) do
                         if reached(selectedGoal,3) then break end
                         if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+0.2 end
-                        task.wait(0.05)
+                        heartbeat:Wait()
+                        local currentPosition=root.Position
+                        -- A chegada final continua exigindo proximidade real ao destino.
+                        if index<#waypoints and point.Action~=Enum.PathWaypointAction.Jump then
+                            passed=crossedPoint(previousPosition,currentPosition,point.Position,reachRadius)
+                        end
+                        previousPosition=currentPosition
                     end
                     if not active() or reached(selectedGoal,3) then break end
-                    if not reached(point.Position,reachRadius) then
+                    if not passed and not reached(point.Position,reachRadius) then
                         failure=string.format("TRAVOU no trecho %d, ponto %d/%d | andou %.1f studs | estado %s",
                             segment,index,#waypoints,flatDistance(root.Position,startPosition),tostring(humanoid:GetState()))
                         break
