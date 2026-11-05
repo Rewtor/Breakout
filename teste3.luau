@@ -1,7 +1,7 @@
 -- =========================================================
 -- DICE RADAR V18 LITE | HOP POR PAGINA
 -- Painel mobile + ranking + webhook + server hop
--- Coleta opcional: teleporte de ida e retorno andando; sem ESP.
+-- Teste de caminhada: somente ida ao ovo, sem coleta nem retorno.
 -- =========================================================
 
 local Players = game:GetService("Players")
@@ -1923,7 +1923,7 @@ end
 local collector = {
     enabled = false, generation = 0, seen = {}, attempted = {}, pending = false,
     changedAt = 0, startedAt = 0, humanoid = nil, prompt = nil,
-    testOnly = false, cleanup = nil,
+    cleanup = nil, finished = false,
 }
 local collectionStatus = text(settings, {
     Text = "Coleta desligada.", Size = UDim2.new(1, -8, 0, 64),
@@ -1934,6 +1934,8 @@ local function collectionMessage(message)
 end
 stopCollection = function()
     if collector.cleanup then collector.cleanup() end
+    collector.enabled = false
+    collector.pending = false
     collector.generation = collector.generation + 1
     if collector.prompt then
         pcall(function() collector.prompt:InputHoldEnd() end)
@@ -1944,31 +1946,29 @@ stopCollection = function()
         if root then collector.humanoid:MoveTo(root.Position) end
     end
     -- Busy so e liberado quando o worker antigo terminar.
-    collectionMessage("Coleta/retorno cancelados; personagem permanece onde esta.")
+    collectionMessage("Caminhada cancelada.")
 end
-addToggle("Coletar o mais caro e voltar andando", false, function(value)
-    collector.enabled = value
-    if not value then
-        stopCollection()
-    else
-        table.clear(collector.seen)
-        table.clear(collector.attempted)
-        collector.pending = true
-        collector.startedAt = os.clock()
-        collector.changedAt = os.clock()
-        collectionMessage("Aguardando os ovos carregarem...")
+addButton("TESTAR: andar ate o ovo mais caro", function()
+    if collectorBusy then
+        collectionMessage("Caminhada em andamento; cancele antes de iniciar outra.")
+        return
     end
+    if isHopping then
+        collectionMessage("Cancele a busca de servidor antes do teste.")
+        return
+    end
+    collector.enabled = true
+    collector.finished = false
+    table.clear(collector.seen)
+    table.clear(collector.attempted)
+    collector.pending = true
+    collector.startedAt = os.clock()
+    collector.changedAt = os.clock()
+    collectionMessage("Teste de caminhada: aguardando os ovos carregarem...")
 end)
-addToggle("Testar somente ida e retorno (sem coletar)", false, function(value)
-    collector.testOnly = value
-end)
-addButton("Cancelar coleta/retorno atual", function()
-    collector.pending = false
-    stopCollection()
-end)
+addButton("Cancelar caminhada", stopCollection)
 
--- API observada no script de referencia: BottomCFrame, CarryFieldEgg,
--- CarryChanged({IsCarrying, Uid}). Nao usa nomes de remotes presumidos.
+-- Posicao do registro, com alternativa pelo modelo visual.
 local function collectionDestination(model, rec)
     if rec and typeof(rec.BottomCFrame) == "CFrame" then return rec.BottomCFrame.Position end
     if not model then return nil end
@@ -1978,238 +1978,7 @@ local function collectionDestination(model, rec)
     return part and part.Position or nil
 end
 
-local carryObserver = {module = nil, link = nil, carrying = false, uid = nil, revision = 0}
-local function bindCarryObserver()
-    local state = modules.EggState
-    if carryObserver.module == state and carryObserver.link then return true end
-    if carryObserver.link then
-        carryObserver.link:Disconnect()
-        carryObserver.link = nil
-    end
-    carryObserver.module = state
-    carryObserver.carrying, carryObserver.uid = false, nil
-    if not state or not state.CarryChanged then return false end
-    local ok, link = pcall(function()
-        return state.CarryChanged:Connect(function(event)
-            if type(event) ~= "table" then return end
-            carryObserver.revision = carryObserver.revision + 1
-            carryObserver.carrying = event.IsCarrying == true
-            carryObserver.uid = carryObserver.carrying and event.Uid or nil
-        end)
-    end)
-    if ok and link then
-        carryObserver.link = link
-        return true
-    end
-    return false
-end
-connect(gui.Destroying, function()
-    if carryObserver.link then carryObserver.link:Disconnect() end
-    carryObserver.link = nil
-end)
-
--- Portal: sequencia adaptada de V3PortalTo do arquivo de referencia.
--- Os nomes e limites abaixo dependem da estrutura atual do mapa normal.
-local function fusePortals()
-    local world = Workspace:FindFirstChild("World")
-    local build = world and world:FindFirstChild("Build")
-    local lanes = build and build:FindFirstChild("FuseBiomeLanePortals")
-    local zone = build and build:FindFirstChild("FuseBiomeZone")
-    local entrance = lanes and lanes:FindFirstChildWhichIsA("BasePart")
-    local exitPart = zone and zone:FindFirstChild("ExitPart", true)
-    if not entrance or not exitPart or not exitPart:IsA("BasePart") then
-        return nil, nil, "Portal de entrada ou ExitPart do Fuse Biome nao encontrado."
-    end
-    return entrance, exitPart
-end
-
-local function portalApproach(uid, model, rec, character, humanoid, root, active)
-    local entrance, exitPart, missing = fusePortals()
-    if not entrance then return false, missing end
-    if type(firetouchinterest) ~= "function" then
-        return false, "Este ambiente nao oferece firetouchinterest."
-    end
-    local packages = RS:FindFirstChild("Packages")
-    local network = packages and packages:FindFirstChild("Networking")
-    local transition = network and network:FindFirstChild("RE/FuseBiome/PortalTransition")
-    local previousPlatformStand = humanoid.PlatformStand
-    local transitionLink
-    local function cleanup()
-        if transitionLink then transitionLink:Disconnect(); transitionLink = nil end
-        if humanoid.Parent then humanoid.PlatformStand = previousPlatformStand end
-    end
-    collector.cleanup = cleanup
-    local phase = "Preparacao"
-    local function stage(name)
-        phase = name
-        collectionMessage("Portal: " .. name)
-    end
-    local function check()
-        if not active() then error("rotina cancelada ou personagem alterado", 0) end
-    end
-    local function tick()
-        game:GetService("RunService").Heartbeat:Wait()
-        check()
-    end
-    local function inFuse() return root.Position.Y > 10000 end
-    local function setPosition(position)
-        root.CFrame = CFrame.new(position) * root.CFrame.Rotation
-        root.AssemblyLinearVelocity = Vector3.zero
-        root.AssemblyAngularVelocity = Vector3.zero
-    end
-    local function touch(part)
-        check()
-        if not part.Parent then error("portal removido durante a tentativa", 0) end
-        firetouchinterest(root, part, 0)
-        firetouchinterest(root, part, 1)
-    end
-    local function leaveFuse()
-        stage("saindo do Fuse Biome")
-        humanoid.PlatformStand = false
-        local deadline = os.clock() + 8
-        while inFuse() and os.clock() < deadline do
-            touch(exitPart)
-            task.wait(0.1)
-            check()
-        end
-        if inFuse() then error("saida nao concluida; personagem continua no Fuse Biome", 0) end
-    end
-    local function targetPosition()
-        local state = modules.EggState
-        if state and type(state.ReadFieldEggs) == "function" then
-            local ok, snapshot = pcall(state.ReadFieldEggs)
-            if ok and type(snapshot) == "table" then
-                local records = snapshot.Records or snapshot
-                for key, record in pairs(records) do
-                    if type(record) == "table" and tostring(record.Uid or key) == uid then
-                        if record.State == "Claimed" or record.State == "Carried" then
-                            error("ovo deixou de estar disponivel", 0)
-                        end
-                        rec = record
-                        break
-                    end
-                end
-            end
-        end
-        local position = collectionDestination(model, rec)
-        if not position then error("ovo sem posicao atual", 0) end
-        return position
-    end
-    local ok, result = pcall(function()
-        check()
-        if inFuse() then leaveFuse() end
-        if root.Anchored then
-            stage("saindo da esteira")
-            local doff = network and network:FindFirstChild("RF/Treadmill/AskDoff")
-            if not doff or not doff:IsA("RemoteFunction") then error("raiz ancorada; saia da esteira", 0) end
-            -- A chamada pode ceder; nao deixe bloquear o temporizador da rotina.
-            task.spawn(function() pcall(doff.InvokeServer, doff) end)
-            local untilTime = os.clock() + 3
-            while root.Anchored and os.clock() < untilTime do tick() end
-            if root.Anchored then error("personagem continua ancorado", 0) end
-        end
-        humanoid:UnequipTools()
-        -- Prepara a saida da base, como na referencia, antes do salto longo.
-        if root.Position.X < 552 then
-            stage("preparando posicao na zona segura")
-            local home = Vector3.new(528.7, 70.57, -364.11)
-            local podium = Workspace:FindFirstChild("GearGiver_Slap")
-            podium = podium and podium:FindFirstChild("Podium")
-            if podium and podium:IsA("BasePart") then
-                home = podium.CFrame:PointToWorldSpace(Vector3.new(-16.415,21.072,-6.106))
-            end
-            local spot = home + Vector3.new(0,3,0)
-            if (root.Position-home).Magnitude > 69 then
-                local untilTime = os.clock()+15
-                while (root.Position-spot).Magnitude > 4 and os.clock()<untilTime do
-                    local dt = game:GetService("RunService").Heartbeat:Wait()
-                    check()
-                    local delta = spot-root.Position
-                    setPosition(root.Position+delta.Unit*math.min(400*math.clamp(dt,1/240,0.05),delta.Magnitude))
-                end
-                if (root.Position-spot).Magnitude > 4 then error("nao chegou ao ponto de preparacao",0) end
-                local settle = os.clock()+0.5
-                while os.clock()<settle do setPosition(spot);tick() end
-            end
-        end
-        local target = targetPosition()
-        local race = Workspace:FindFirstChild("RaceRallyPortal", true)
-        local hitbox = race and (race:IsA("BasePart") and race or race:FindFirstChild("Hitbox", true))
-        if hitbox and (tonumber(Workspace:GetAttribute("RaceRallyJoinEndsAt")) or 0)>Workspace:GetServerTimeNow()
-            and (hitbox.Position-target).Magnitude<100 then error("ovo perto do portal de corrida aberto",0) end
-        for attempt=1,2 do
-            check()
-            target = targetPosition()
-            local landing = target+Vector3.new(0,3,0)
-            stage("aproximando do ovo ("..attempt.."/2)")
-            humanoid.PlatformStand = true
-            local holdUntil, stableAt = os.clock()+3, nil
-            while os.clock()<holdUntil do
-                check()
-                if (root.Position-landing).Magnitude>15 then
-                    setPosition(landing)
-                    stableAt=nil
-                else
-                    stableAt=stableAt or os.clock()
-                    if os.clock()-stableAt>=0.15 then break end
-                end
-                tick()
-            end
-            if not stableAt or os.clock()-stableAt<0.15 then error("posicao nao estabilizou antes do portal",0) end
-            local transitioned=false
-            if transition and transition:IsA("RemoteEvent") then
-                transitionLink=transition.OnClientEvent:Connect(function() transitioned=true end)
-            end
-            stage("aguardando entrada no Fuse Biome")
-            local entryDeadline=os.clock()+4
-            while not inFuse() and os.clock()<entryDeadline do
-                check()
-                if not transitioned and (root.Position-landing).Magnitude>15 then setPosition(landing) end
-                touch(entrance)
-                task.wait(0.1)
-            end
-            if transitionLink then transitionLink:Disconnect();transitionLink=nil end
-            humanoid.PlatformStand=false
-            check()
-            if not inFuse() then error("entrada no Fuse Biome nao confirmada",0) end
-            leaveFuse()
-            stage("verificando posicao apos a saida")
-            task.wait(0.5)
-            check()
-            target=targetPosition()
-            local distance=(root.Position-target).Magnitude
-            if distance<=12 then
-                -- Verificacao sem reaplicar CFrame: detecta retorno forcado.
-                task.wait(0.5)
-                check()
-                if (root.Position-target).Magnitude<=12 then return target end
-            elseif distance<=600 then
-                -- Aproximacao residual andando; sem velocidade artificial.
-                local path=game:GetService("PathfindingService"):CreatePath({AgentCanJump=true})
-                local computed=pcall(function() path:ComputeAsync(root.Position,target) end)
-                check()
-                if computed and path.Status==Enum.PathStatus.Success then
-                    for _,point in ipairs(path:GetWaypoints()) do
-                        check()
-                        if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
-                        humanoid:MoveTo(point.Position)
-                        local timeout=os.clock()+6
-                        while (root.Position-point.Position).Magnitude>3 and os.clock()<timeout do tick() end
-                        if (root.Position-point.Position).Magnitude>3 then break end
-                    end
-                end
-                path:Destroy()
-                if (root.Position-target).Magnitude<=12 then return target end
-            end
-        end
-        error("a saida do portal nao manteve o personagem perto do ovo",0)
-    end)
-    cleanup()
-    collector.cleanup=nil
-    if not ok then return false, phase..": "..tostring(result) end
-    return true, result
-end
-
+-- Somente caminhada: nenhuma alteracao de CFrame, velocidade ou portal.
 local function runCollection(uid, model, rec)
     collectorBusy = true
     collector.generation = collector.generation + 1
@@ -2218,6 +1987,7 @@ local function runCollection(uid, model, rec)
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     local root = character and character:FindFirstChild("HumanoidRootPart")
     collector.humanoid = humanoid
+    local path
     local function active()
         return alive and collector.enabled and not paused
             and generation == collector.generation
@@ -2225,128 +1995,68 @@ local function runCollection(uid, model, rec)
             and humanoid and humanoid.Parent and humanoid.Health > 0
     end
     local ok, err = pcall(function()
-        if not active() then return end
-        local state = modules.EggState
-        if not state or type(state.CarryFieldEgg) ~= "function" then
-            collectionMessage("EggState.CarryFieldEgg indisponivel; nenhuma movimentacao realizada.")
-            return
+        if not active() then error("personagem indisponivel", 0) end
+        if root.Anchored or humanoid.WalkSpeed <= 0 then
+            error("personagem imobilizado; saia da esteira antes do teste", 0)
         end
-        if not bindCarryObserver() then
-            collectionMessage("CarryChanged indisponivel; nao e possivel confirmar a coleta.")
-            return
-        end
-        if carryObserver.carrying then
-            collectionMessage("Voce ja esta carregando um ovo; coleta adiada.")
-            return
-        end
-        local origin = root.Position
         local target = collectionDestination(model, rec)
-        if not target or (rec and rec.State == "Claimed") then
-            collectionMessage("Ovo sem posicao ou ja coletado.")
-            return
+        if not target then error("ovo sem posicao", 0) end
+        local function nearTarget()
+            local delta = root.Position-target
+            return Vector3.new(delta.X,0,delta.Z).Magnitude <= 6 and math.abs(delta.Y)<=8
         end
-        local testOnly = collector.testOnly
-        local reached, result = portalApproach(uid, model, rec, character, humanoid, root, active)
-        if not active() then return end
-        if root.Position.Y > 10000 then
-            collectionMessage("Falha: "..tostring(result)..". Saia do Fuse Biome manualmente.")
-            return
-        end
-        local approachError = not reached and tostring(result) or nil
-        if reached then target = result end
-        local landing = target + Vector3.new(0, 3, 0)
-        local confirmed = false
-        local pickupOk, pickupError = pcall(function()
-            if approachError then error(approachError, 0) end
-            if testOnly then return end
-            if (root.Position - landing).Magnitude > 12 then
-                error("personagem nao permaneceu perto do destino")
-            end
-            collectionMessage("Solicitando CarryFieldEgg; aguardando confirmacao...")
-            local initialRevision = carryObserver.revision
-            local requestError
-            for attempt = 1, 3 do
-                if not active() then return end
-                if carryObserver.carrying then
-                    if carryObserver.uid == uid and carryObserver.revision > initialRevision then
-                        confirmed = true
-                        return
-                    end
-                    error("outro ovo esta sendo carregado")
-                end
-                if (root.Position - landing).Magnitude > 12 then
-                    error("personagem saiu do alcance do ovo")
-                end
-                local requested, failure = pcall(state.CarryFieldEgg, uid)
-                if not requested then requestError = tostring(failure) end
-                local deadline = os.clock() + 1.5
-                repeat
-                    if not active() then return end
-                    if carryObserver.carrying then
-                        if carryObserver.uid == uid and carryObserver.revision > initialRevision then
-                            confirmed = true
-                            return
-                        end
-                        error("outro ovo esta sendo carregado")
-                    end
-                    task.wait(0.1)
-                until os.clock() >= deadline
-            end
-            error(requestError or "CarryChanged nao confirmou o UID apos 3 tentativas")
-        end)
-        if not active() then return end
-        -- Caminhada real: sem mudar WalkSpeed e sem teleporte no retorno.
-        local deadline = os.clock() + 120
+        local deadline = os.clock()+120
         local arrived = false
-        for attempt = 1, 4 do
-            if not active() or os.clock() >= deadline then break end
-            if (root.Position - origin).Magnitude <= 3 then arrived = true break end
-            collectionMessage("Voltando andando ao ponto inicial...")
-            local path = game:GetService("PathfindingService"):CreatePath({
-                AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4,
+        for attempt=1,4 do
+            if not active() or os.clock()>=deadline then break end
+            if nearTarget() then arrived=true;break end
+            collectionMessage("Andando ate "..tostring(cached[uid] and cached[uid].C or uid)
+                .." | rota "..attempt.."/4")
+            path=game:GetService("PathfindingService"):CreatePath({
+                AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=4,
             })
-            local computed = pcall(function() path:ComputeAsync(root.Position, origin) end)
-            if not active() then path:Destroy() return end
-            if computed and path.Status == Enum.PathStatus.Success then
-                for _, waypoint in ipairs(path:GetWaypoints()) do
-                    if not active() or os.clock() >= deadline then break end
-                    if waypoint.Action == Enum.PathWaypointAction.Jump then humanoid.Jump = true end
-                    humanoid:MoveTo(waypoint.Position)
-                    local timeout = math.min(deadline, os.clock() + 6)
-                    while active() and os.clock() < timeout
-                        and (root.Position - waypoint.Position).Magnitude > 3 do task.wait(0.1) end
-                    if not active() or (root.Position - waypoint.Position).Magnitude > 3 then break end
+            local computed=pcall(function() path:ComputeAsync(root.Position,target) end)
+            if not active() then break end
+            if computed and path.Status==Enum.PathStatus.Success then
+                for _,point in ipairs(path:GetWaypoints()) do
+                    if not active() or os.clock()>=deadline then break end
+                    if nearTarget() then arrived=true;break end
+                    if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
+                    humanoid:MoveTo(point.Position)
+                    local timeout=math.min(deadline,os.clock()+6)
+                    while active() and os.clock()<timeout
+                        and (root.Position-point.Position).Magnitude>3 do
+                        if nearTarget() then arrived=true;break end
+                        task.wait(0.1)
+                    end
+                    if arrived or not active() or (root.Position-point.Position).Magnitude>3 then break end
                 end
             end
-            path:Destroy()
-            if (root.Position - origin).Magnitude <= 3 then arrived = true break end
-            task.wait(0.3)
+            path:Destroy();path=nil
+            if active() and nearTarget() then arrived=true end
+            if arrived then break end
+            if active() then task.wait(0.3) end
         end
         if active() then
-            humanoid:MoveTo(root.Position)
-            local result = arrived and "Retorno concluido." or "Retorno bloqueado; assuma o controle."
-            collectionMessage(result .. (pickupOk
-                and (testOnly and " Teste de ida concluido; coleta desativada."
-                    or (confirmed and " Coleta confirmada antes do retorno." or " Coleta nao confirmada."))
-                or " Coleta falhou: " .. tostring(pickupError)))
+            collectionMessage(arrived
+                and "Chegou perto do ovo. Teste encerrado: sem coletar e sem retornar."
+                or "Nao foi possivel chegar andando; rota bloqueada ou tempo esgotado.")
+        elseif alive and generation==collector.generation then
+            collectionMessage("Teste interrompido: personagem morreu, mudou ou radar foi pausado.")
         end
     end)
-    if collector.cleanup then collector.cleanup(); collector.cleanup = nil end
-    if not ok and alive then
-        collectionMessage("Falha na rotina: " .. tostring(err))
-    end
-    if collector.prompt then pcall(function() collector.prompt:InputHoldEnd() end) end
-    collector.prompt = nil
+    if path then path:Destroy() end
     if humanoid and humanoid.Parent and root and root.Parent then humanoid:MoveTo(root.Position) end
-    collector.humanoid = nil
-    collectorBusy = false
-    lastValidEggTime = os.clock()
+    if not ok and alive then collectionMessage("Falha na caminhada: "..tostring(err)) end
+    collector.humanoid=nil
+    collectorBusy=false
+    collector.finished=true
+    collector.pending=false
+    lastValidEggTime=os.clock()
 end
 
 local function updateCollection(models, records, all, now)
-    bindCarryObserver()
-    if not collector.enabled then return end
-    if carryObserver.carrying then return end
+    if not collector.enabled or collector.finished then return end
     for uid in pairs(all) do
         if not collector.seen[uid] then
             collector.seen[uid] = true
@@ -2455,7 +2165,7 @@ local function scan()
 
     if targets > 0 or collectorBusy then
         lastValidEggTime = now
-    elseif errors == 0 and cfg.AH and not isHopping
+    elseif errors == 0 and cfg.AH and not isHopping and not collector.enabled
         and now - lastValidEggTime >= cfg.AHT then
         task.spawn(doServerHop)
     end
@@ -2463,7 +2173,7 @@ local function scan()
     if not minimized and not mobile then
         local stateText = "Monitorando o mapa"
 
-        if cfg.AH and targets == 0 then
+        if cfg.AH and targets == 0 and not collector.enabled then
             local remaining = math.max(
                 0, math.ceil(cfg.AHT - (now - lastValidEggTime))
             )
