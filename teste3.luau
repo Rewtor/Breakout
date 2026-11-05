@@ -1920,13 +1920,83 @@ end
 -- =========================================================
 -- COLETA: VIAGEM MANUAL OU UMA VIAGEM POR RENOVACAO DETECTADA
 -- Renovacao inferida por UIDs novos; nao e um evento oficial do jogo.
--- Nao afirma posse: Claimed/remoção podem ser causados por outro jogador.
+-- Posse conferida por ReadCarryState.Uid; remocao/Claimed nao prova entrega.
 -- =========================================================
 local collector = {
     enabled = false, generation = 0, seen = {}, attempted = {}, pending = false,
     changedAt = 0, startedAt = 0, humanoid = nil, prompt = nil,
     cleanup = nil, finished = false,
 }
+-- Associacao experimental por ancora observada ANTES da aproximacao.
+local promptAnchors={pool={},bindings={},pending={},records={},models={},elapsed=0}
+function promptAnchors.position(prompt)
+    local parent=prompt.Parent
+    if not parent then return nil end
+    if parent:IsA("Attachment") then return parent.WorldPosition end
+    if parent:IsA("BasePart") then return parent.Position end
+    if parent:IsA("Model") then return parent:GetPivot().Position end
+end
+function promptAnchors.track(object)
+    if object:IsA("ProximityPrompt") and object.Name=="CarryAreaEgg" then promptAnchors.pool[object]=true end
+end
+for _,object in ipairs(Workspace:GetDescendants()) do promptAnchors.track(object) end
+connect(Workspace.DescendantAdded,promptAnchors.track)
+connect(Workspace.DescendantRemoving,function(object)
+    promptAnchors.pool[object]=nil
+    promptAnchors.bindings[object]=nil
+    promptAnchors.pending[object]=nil
+end)
+function promptAnchors.valid(binding,records,models)
+    local record=records[binding.uid]
+    return record and record.State~="Claimed" and typeof(record.BottomCFrame)=="CFrame"
+        and (record.BottomCFrame.Position-binding.bottom).Magnitude<=0.05
+        and models[binding.uid]==binding.model and binding.model.Parent~=nil
+end
+function promptAnchors.sample()
+    local character=player.Character
+    local root=character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local records,models=promptAnchors.records,promptAnchors.models
+    local now=os.clock()
+    for prompt in pairs(promptAnchors.pool) do
+        local binding=promptAnchors.bindings[prompt]
+        if binding and not promptAnchors.valid(binding,records,models) then
+            promptAnchors.bindings[prompt]=nil;binding=nil
+        end
+        local position=promptAnchors.position(prompt)
+        local matchedUid=nil
+        local matchCount=0
+        if position then
+            for eggUid,record in pairs(records) do
+                if record.State~="Claimed" and models[eggUid] and typeof(record.BottomCFrame)=="CFrame"
+                    and (position-record.BottomCFrame.Position).Magnitude<=0.05 then
+                    matchCount=matchCount+1;matchedUid=eggUid
+                end
+            end
+        end
+        if matchCount==1 and (root.Position-position).Magnitude>=12 then
+            local record=records[matchedUid]
+            local bottom=record.BottomCFrame.Position
+            if binding and binding.uid~=matchedUid then promptAnchors.bindings[prompt]=nil end
+            local pending=promptAnchors.pending[prompt]
+            if not pending or pending.uid~=matchedUid or pending.model~=models[matchedUid]
+                or (pending.bottom-bottom).Magnitude>0.05 then
+                promptAnchors.pending[prompt]={uid=matchedUid,bottom=bottom,model=models[matchedUid],since=now}
+            elseif now-pending.since>=0.2 then
+                promptAnchors.bindings[prompt]={uid=matchedUid,bottom=bottom,model=models[matchedUid],observedAt=now}
+            end
+        else
+            promptAnchors.pending[prompt]=nil
+        end
+    end
+end
+connect(game:GetService("RunService").Heartbeat,function(dt)
+    if not alive then return end
+    promptAnchors.elapsed=promptAnchors.elapsed+dt
+    if promptAnchors.elapsed<0.25 then return end
+    promptAnchors.elapsed=0
+    promptAnchors.sample()
+end)
 local collectionStatus = text(settings, {
     Text = "Coleta desligada.", Size = UDim2.new(1, -8, 0, 64),
     LayoutOrder = 100,
@@ -1972,6 +2042,9 @@ do
             lines[#lines+1]="Personagem: "..pos(target.character)
             lines[#lines+1]=string.format("Registro atual: %s | candidatos aceitos: %d | prompts examinados: %d",
                 tostring(target.hasCurrentRecord),data.promptAccepted or 0,data.promptExamined or 0)
+            if data.anchor then
+                lines[#lines+1]="Prompt por ancora previa: "..tostring(data.anchor.uid).." (experimental)"
+            end
             if data.carry then
                 lines[#lines+1]="Posse pelo UID: "..tostring(data.carry.confirmed)
                     .." | alvo: "..tostring(data.carry.targetUid)
@@ -2921,10 +2994,8 @@ local function runCollection(uid, model, rec)
             if parent:IsA("BasePart") then return parent.Position end
             if parent:IsA("Model") then return parent:GetPivot().Position end
         end
-        local spatialChoice=nil
         local spatialEggs={}
         local promptPool=nil
-        local spatialMatch=nil
         local function belongsToSelectedEgg(prompt,identityOnly)
             if not prompt or not prompt.Parent then return false,"removido" end
             if prompt.Name~="CarryAreaEgg" and prompt.Name~="StealPrompt" then
@@ -2947,71 +3018,19 @@ local function runCollection(uid, model, rec)
             end
             if inside then return true,"modelo do alvo" end
             if matched then return true,"UID do alvo" end
-            if not identityOnly and spatialMatch and prompt==spatialChoice then
-                return spatialMatch(prompt)
-            end
-            return false,"sem vinculo com o alvo"
-        end
-        spatialMatch=function(prompt)
-            if prompt.Name~="CarryAreaEgg" then return false,"tipo sem associacao espacial" end
-            local position=promptPosition(prompt)
-            local targetPosition=spatialEggs[tostring(uid)]
-            if not position or not targetPosition then return false,"BoundsCFrame indisponivel" end
-            local targetDistance=(position-targetPosition).Magnitude
-            -- A margem somente rejeita empates/ruido; nao desloca o personagem.
-            local separation=0.25
-            if targetDistance>prompt.MaxActivationDistance then return false,"prompt distante do BoundsCFrame" end
-            local otherEggDistance=math.huge
-            for otherUid,otherPosition in pairs(spatialEggs) do
-                if otherUid~=tostring(uid) then
-                    otherEggDistance=math.min(otherEggDistance,(position-otherPosition).Magnitude)
+            local binding=promptAnchors.bindings[prompt]
+            if binding then
+                local currentModels,currentRecords=collectSources()
+                if not promptAnchors.valid(binding,currentRecords,currentModels) then
+                    promptAnchors.bindings[prompt]=nil
+                    return false,"ancora invalidada: ovo removido, substituido ou deslocado"
                 end
+                if binding.uid~=tostring(uid) then return false,"ancora pertence a outro UID" end
+                diagnostics.anchor={uid=binding.uid,observedAt=binding.observedAt,
+                    bottom={binding.bottom.X,binding.bottom.Y,binding.bottom.Z},path=prompt:GetFullName()}
+                return true,"ancora BottomCFrame observada antes da aproximacao (experimental)"
             end
-            if otherEggDistance-targetDistance<=separation then return false,"prompt mais perto de outro ovo ou empate" end
-            -- Um ovo grande pode colocar varios prompts mais perto do mesmo
-            -- BoundsCFrame. Nao desempata esse caso escolhendo o mais proximo.
-            -- Inclui prompts ocultos/desabilitados: visibilidade nao e identidade.
-            local competingPrompts=0
-            for _,candidate in ipairs(promptPool or {}) do
-                if candidate.Parent and candidate.Name=="CarryAreaEgg" then
-                    local identified,identityReason=belongsToSelectedEgg(candidate,true)
-                    local candidatePosition=promptPosition(candidate)
-                    if candidatePosition and (identified or identityReason=="sem vinculo com o alvo") then
-                        local distance=(candidatePosition-targetPosition).Magnitude
-                        if distance<=candidate.MaxActivationDistance then
-                            local nearestOther=math.huge
-                            for otherUid,otherPosition in pairs(spatialEggs) do
-                                if otherUid~=tostring(uid) then
-                                    nearestOther=math.min(nearestOther,(candidatePosition-otherPosition).Magnitude)
-                                end
-                            end
-                            if distance<=nearestOther+separation then
-                                competingPrompts=competingPrompts+1
-                            end
-                        end
-                    end
-                end
-            end
-            diagnostics.spatialAmbiguity={uid=tostring(uid),competingPrompts=competingPrompts,
-                blocked=competingPrompts>1}
-            if competingPrompts>1 then
-                return false,"sobreposicao ambigua: varios prompts apontam para o mesmo ovo; exige vinculo por UID/modelo"
-            end
-            local otherPromptDistance=math.huge
-            for _,otherPrompt in ipairs(promptPool or {}) do
-                if otherPrompt~=prompt and otherPrompt.Parent and otherPrompt.Enabled
-                    and otherPrompt.Name=="CarryAreaEgg" then
-                    local otherPosition=promptPosition(otherPrompt)
-                    if otherPosition then
-                        otherPromptDistance=math.min(otherPromptDistance,(otherPosition-targetPosition).Magnitude)
-                    end
-                end
-            end
-            diagnostics.spatial={uid=tostring(uid),promptDistance=targetDistance,
-                otherPromptDistance=otherPromptDistance<math.huge and otherPromptDistance or nil,
-                otherEggDistance=otherEggDistance<math.huge and otherEggDistance or nil}
-            if otherPromptDistance-targetDistance<=separation then return false,"outro prompt mais perto do alvo ou empate" end
-            return true,"proximidade reciproca ao BoundsCFrame (experimental)"
+            return false,"sem UID/modelo ou ancora previa valida"
         end
         local function selectPrompt()
             local candidates={}
@@ -3022,7 +3041,6 @@ local function runCollection(uid, model, rec)
             local function coordinates(position)
                 return position and {position.X,position.Y,position.Z} or nil
             end
-            spatialChoice=nil
             local function add(prompt)
                 if inspected[prompt] then return end
                 inspected[prompt]=true
@@ -3059,10 +3077,6 @@ local function runCollection(uid, model, rec)
                 end
                 local belongs,reason=belongsToSelectedEgg(prompt)
                 if not belongs then
-                    if reason=="sem vinculo com o alvo" then
-                        reason=reason..(spatialEggs[tostring(uid)]
-                            and "; nao e o prompt mais proximo elegivel" or "; BoundsCFrame atual indisponivel")
-                    end
                     observation.verdict="rejeitado: "..reason
                     rejected[#rejected+1]={path=prompt:GetFullName(),reason=reason}
                     return
@@ -3103,19 +3117,6 @@ local function runCollection(uid, model, rec)
                 model=model and model:GetFullName() or "indisponivel",bounds=coordinates(reportBounds),
                 bottom=targetRecord and typeof(targetRecord.BottomCFrame)=="CFrame" and coordinates(targetRecord.BottomCFrame.Position) or nil,
                 character=coordinates(root.Position),hasCurrentRecord=currentRecords[tostring(uid)]~=nil or currentRecords[uid]~=nil}
-            local nearestDistance=math.huge
-            if targetPosition then
-                for _,prompt in ipairs(promptPool) do
-                    if prompt.Parent and prompt.Enabled and prompt.Name=="CarryAreaEgg" then
-                        local identified,reason=belongsToSelectedEgg(prompt,true)
-                        local position=promptPosition(prompt)
-                        if position and (identified or reason=="sem vinculo com o alvo") then
-                            local distance=(position-targetPosition).Magnitude
-                            if distance<nearestDistance then nearestDistance=distance;spatialChoice=prompt end
-                        end
-                    end
-                end
-            end
             if model and model.Parent then
                 for _,item in ipairs(model:GetDescendants()) do add(item) end
             end
@@ -3205,7 +3206,7 @@ local function runCollection(uid, model, rec)
             until os.clock()>=deadline
             if not active() then return end
             outcome=count and count>1 and "Interacao ambigua; coleta nao tentada."
-                or "Sem prompt unico por identidade/BoundsCFrame; coleta bloqueada."
+                or "Sem prompt unico por UID/modelo ou ancora previa; coleta bloqueada."
             if prompt then
                 interactionAttempted=true
                 local _,association=belongsToSelectedEgg(prompt)
@@ -3434,6 +3435,8 @@ local function scan()
     loadModules()
 
     local models, records, all = collectSources()
+    promptAnchors.models=models
+    promptAnchors.records=records
     local total, targets, best, errors = 0, 0, 0, 0
     local now = os.clock()
 
