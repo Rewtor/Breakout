@@ -2141,11 +2141,9 @@ local function runCollection(uid, model, rec)
             if reached(target,arrivalRadius) then arrived=true;break end
             local segmentStart=root.Position
             local route
-            local reused=false
             -- Usa o trecho pronto apenas se ainda estivermos na entrada prevista.
             if prepared and prepared.done and prepared.route and reached(prepared.start,math.clamp(humanoid.WalkSpeed/60+3,5,12)) then
                 route=prepared.route
-                reused=true
             end
             planId=planId+1
             prepared=nil
@@ -2158,6 +2156,7 @@ local function runCollection(uid, model, rec)
             end
             if not active() or not route then break end
             local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
+            local segmentReached=false
             if not finalLeg then
                 local id=planId
                 local job={start=selectedGoal,done=false}
@@ -2174,10 +2173,15 @@ local function runCollection(uid, model, rec)
                     end
                 end)
             end
-            for index=(reused and #waypoints>1) and 2 or 1,#waypoints do
+            -- O primeiro ponto e a origem do calculo, nao um destino para voltar.
+            -- Preserva uma eventual acao de salto na origem.
+            if waypoints[1] and waypoints[1].Action==Enum.PathWaypointAction.Jump then
+                humanoid.Jump=true
+            end
+            for index=(#waypoints>1) and 2 or 1,#waypoints do
                 local point=waypoints[index]
                 if not active() or os.clock()>=deadline then break end
-                if reached(selectedGoal,3) then break end
+                if reached(selectedGoal,3) then segmentReached=true;break end
                 -- Antecipa o proximo destino em retas; conserva precisao nas curvas/pulos.
                 local reachRadius=2.5
                 local nextPoint=waypoints[index+1]
@@ -2203,17 +2207,24 @@ local function runCollection(uid, model, rec)
                     local previousPosition=root.Position
                     local passed=false
                     while active() and os.clock()<timeout and not passed and not reached(point.Position,reachRadius) do
-                        if reached(selectedGoal,3) then break end
+                        if reached(selectedGoal,3) then segmentReached=true;break end
                         if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+0.2 end
                         heartbeat:Wait()
                         local currentPosition=root.Position
-                        -- A chegada final continua exigindo proximidade real ao destino.
-                        if index<#waypoints and point.Action~=Enum.PathWaypointAction.Jump then
+                        -- Inclui o ultimo ponto: antes ele podia ser ultrapassado e
+                        -- receber MoveTo para tras a cada renovacao do comando.
+                        if point.Action~=Enum.PathWaypointAction.Jump then
                             passed=crossedPoint(previousPosition,currentPosition,point.Position,reachRadius)
+                        end
+                        if index==#waypoints and passed then
+                            segmentReached=true
                         end
                         previousPosition=currentPosition
                     end
-                    if not active() or reached(selectedGoal,3) then break end
+                    if not active() or segmentReached or reached(selectedGoal,3) then
+                        if active() and reached(selectedGoal,3) then segmentReached=true end
+                        break
+                    end
                     if not passed and not reached(point.Position,reachRadius) then
                         failure=string.format("TRAVOU no trecho %d, ponto %d/%d | andou %.1f studs | estado %s",
                             segment,index,#waypoints,flatDistance(root.Position,startPosition),tostring(humanoid:GetState()))
@@ -2222,7 +2233,12 @@ local function runCollection(uid, model, rec)
                 end
             end
             if active() then
-                if finalLeg and reached(selectedGoal,3) or reached(target,arrivalRadius) then arrived=true;break end
+                if finalLeg and (segmentReached or reached(selectedGoal,3))
+                    or reached(target,arrivalRadius) then
+                    -- Interrompe o comando antigo no frame da chegada.
+                    humanoid:MoveTo(root.Position)
+                    arrived=true;break
+                end
                 if flatDistance(root.Position,segmentStart)<2 then stagnant=stagnant+1 else stagnant=0 end
                 if stagnant>=3 then failure="SEM PROGRESSO apos 3 tentativas | "..failure;break end
                 if segment==160 then failure="Limite de 160 trechos atingido." end
