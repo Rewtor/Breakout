@@ -27,7 +27,7 @@ local SCAN_INTERVAL = 1.5
 local GEOMETRY_TTL = 60
 local CONFIG_FILE = "DiceRadar_Config.json"
 local DEFAULT_POSITION = Vector3.new(519.82, 71.85, -364.44)
-local BUILD_ID = "return-forward-prefix-v3"
+local BUILD_ID = "direct-destination-v1"
 
 local function finite(value)
     local n = tonumber(value)
@@ -2538,94 +2538,33 @@ local function runCollection(uid, model, rec)
             end
             visibleMessages=current
         end)
-        local returnSeed=nil
+        -- Um unico destino por perna: sem PathfindingService nem desvios intermediarios.
         local function walkTo(target, returning, targetProvider)
-        -- Conserva a passagem pelo destino mesmo entre dois trechos/ComputeAsync.
-        local returnCrossed=false
-        local lastReturnPosition=root.Position
-        local function updateReturnCrossing()
-            if not returning or returnCrossed then return returnCrossed end
-            local current=root.Position
-            local delta=Vector3.new(current.X-lastReturnPosition.X,0,current.Z-lastReturnPosition.Z)
-            local offset=Vector3.new(target.X-lastReturnPosition.X,0,target.Z-lastReturnPosition.Z)
-            local lengthSquared=delta:Dot(delta)
-            local t=lengthSquared>0 and math.clamp(offset:Dot(delta)/lengthSquared,0,1) or 0
-            local horizontalMiss=(offset-delta*t).Magnitude
-            local height=lastReturnPosition.Y+(current.Y-lastReturnPosition.Y)*t
-            if horizontalMiss<=3 and math.abs(height-target.Y)<=math.max(6,humanoid.HipHeight+root.Size.Y/2+3) then
-                returnCrossed=true
-                recordDiagnostic("destino_retorno_cruzado",{position={current.X,current.Y,current.Z},miss=horizontalMiss})
-                -- Interrompe o comando antigo sem apontar de volta para o DEFAULT.
-                humanoid:MoveTo(current)
+            diagnostics.phase=returning and "volta" or "ida"
+            if returning then diagnostics.returnControl="direct_Humanoid_Move" end
+            recordDiagnostic("inicio",{target={target.X,target.Y,target.Z},walkSpeed=humanoid.WalkSpeed,direct=true})
+            local function flatDistance(a,b)
+                return Vector3.new(a.X-b.X,0,a.Z-b.Z).Magnitude
             end
-            lastReturnPosition=current
-            return returnCrossed
-        end
-        local returnMoveGoal=nil
-        local returnGoalCommand=nil
-        local returnGoalPassed=false
-        local returnGoalAxis=Vector3.zero
-        local returnRouteInvalid=false
-        local returnDirection=Vector3.zero
-        local previousReturnFrame=root.Position
-        local motionBinding="DiceRadarReturn_"..tostring(generation)
-        local motionBound=false
-        local function cleanupReturnMotion()
-            if not motionBound then return end
-            motionBound=false
-            game:GetService("RunService"):UnbindFromRenderStep(motionBinding)
-            if humanoid.Parent then humanoid:Move(Vector3.zero,false) end
-        end
-        local function moveToward(point)
-            if returning then
-                -- Renovar o comando nao pode reativar um waypoint ja cruzado.
-                if returnGoalCommand and (returnGoalCommand-point).Magnitude<0.01 then return end
-                returnGoalCommand=point;returnMoveGoal=point;returnGoalPassed=false
-                local delta=Vector3.new(point.X-root.Position.X,0,point.Z-root.Position.Z)
-                returnGoalAxis=delta.Magnitude>0 and delta.Unit or Vector3.zero
-                previousReturnFrame=root.Position
-            else humanoid:MoveTo(point) end
-        end
-        if returning then
-            motionBound=true
-            collector.returnMotionCleanup=cleanupReturnMotion
-            diagnostics.returnControl="continuous_Humanoid_Move"
-            game:GetService("RunService"):BindToRenderStep(motionBinding,Enum.RenderPriority.Character.Value+1,function()
-                if not active() or returnCrossed then
-                    humanoid:Move(Vector3.zero,false);return
-                end
+            local arrivalRadius=returning and 3 or 0.03
+            local verticalTolerance=math.max(6,humanoid.HipHeight+root.Size.Y/2+3)
+            local previousPosition=root.Position
+            local arrived=false
+            local function updateReturnCrossing()
+                if not returning or arrived then return arrived end
                 local current=root.Position
-                if returnMoveGoal then
-                    local delta=Vector3.new(current.X-previousReturnFrame.X,0,current.Z-previousReturnFrame.Z)
-                    local offset=Vector3.new(returnMoveGoal.X-previousReturnFrame.X,0,returnMoveGoal.Z-previousReturnFrame.Z)
-                    local lengthSquared=delta:Dot(delta)
-                    local t=lengthSquared>0 and offset:Dot(delta)/lengthSquared or -1
-                    local crossed=t>=0 and t<=1 and (offset-delta*t).Magnitude<=3
-                    local direction=Vector3.new(returnMoveGoal.X-current.X,0,returnMoveGoal.Z-current.Z)
-                    local passedPlane=returnGoalAxis.Magnitude>0 and direction:Dot(returnGoalAxis)<=0
-                    if crossed or direction.Magnitude<=3 or passedPlane then
-                        local height=previousReturnFrame.Y+(current.Y-previousReturnFrame.Y)*math.clamp(t,0,1)
-                        local tolerance=math.max(6,humanoid.HipHeight+root.Size.Y/2+3)
-                        local lateral=(direction-returnGoalAxis*direction:Dot(returnGoalAxis)).Magnitude
-                        local corridor=math.clamp(humanoid.WalkSpeed*0.1,6,36)
-                        if math.abs(height-returnMoveGoal.Y)<=tolerance and lateral<=corridor then
-                            returnGoalPassed=true
-                            if passedPlane then recordDiagnostic("waypoint_plano_cruzado",{lateral=lateral}) end
-                        else
-                            returnRouteInvalid=true
-                            recordDiagnostic("waypoint_desvio_recalcular",{target={returnMoveGoal.X,returnMoveGoal.Y,returnMoveGoal.Z},
-                                position={current.X,current.Y,current.Z},lateral=lateral,heightError=math.abs(height-returnMoveGoal.Y)})
-                        end
-                        -- Nao retorna ao ponto ultrapassado; o laço avanca ou recalcula.
-                        returnMoveGoal=nil
-                    elseif direction.Magnitude>0 then returnDirection=direction.Unit end
+                local delta=Vector3.new(current.X-previousPosition.X,0,current.Z-previousPosition.Z)
+                local offset=Vector3.new(target.X-previousPosition.X,0,target.Z-previousPosition.Z)
+                local lengthSquared=delta:Dot(delta)
+                local t=lengthSquared>0 and math.clamp(offset:Dot(delta)/lengthSquared,0,1) or 0
+                local closestHeight=previousPosition.Y+(current.Y-previousPosition.Y)*t
+                if (offset-delta*t).Magnitude<=arrivalRadius and math.abs(closestHeight-target.Y)<=verticalTolerance then
+                    arrived=true
+                    recordDiagnostic("destino_retorno_cruzado",{position={current.X,current.Y,current.Z},miss=(offset-delta*t).Magnitude})
                 end
-                humanoid:Move(returnDirection,false)
-                previousReturnFrame=current
-            end)
-        end
-        diagnostics.phase=returning and "volta" or "ida"
-        recordDiagnostic("inicio",{target={target.X,target.Y,target.Z},walkSpeed=humanoid.WalkSpeed})
+                previousPosition=current
+                return arrived
+            end
         if returning then
             diagnosticConnection=game:GetService("RunService").Heartbeat:Connect(function(dt)
                 if not active() then return end
@@ -2658,525 +2597,97 @@ local function runCollection(uid, model, rec)
                 end
             end)
         end
-        -- X/Z do ovo; Y da raiz permanece na altura fisica do personagem.
-        -- MoveTo cuida da rota; o centro usa controle continuo, sem offset.
-        local arrivalRadius = returning and 3 or 0.03
-        local function flatDistance(a,b)
-            local d=a-b
-            return Vector3.new(d.X,0,d.Z).Magnitude
-        end
-        -- Waypoints ficam no chao; a raiz do personagem fica acima deles.
-        local verticalTolerance=math.max(6,humanoid.HipHeight+root.Size.Y/2+3)
-        local function reached(point, radius)
-            return flatDistance(root.Position,point)<=radius
-                and math.abs(root.Position.Y-point.Y)<=verticalTolerance
-        end
-        local normalSpeed=humanoid.WalkSpeed
-        local appliedSpeed=nil
-        local function restoreSpeed()
-            if appliedSpeed and humanoid.Parent and humanoid.WalkSpeed==appliedSpeed then
-                humanoid.WalkSpeed=normalSpeed
-            end
-            appliedSpeed=nil
-        end
-        collector.restoreSpeed=restoreSpeed
-        local function approachSpeed()
-            -- Na volta, preserva a velocidade do jogo ate chegar ao ponto salvo.
-            if returning then return end
-            if appliedSpeed and humanoid.WalkSpeed~=appliedSpeed then
-                normalSpeed=humanoid.WalkSpeed
+            local normalSpeed=humanoid.WalkSpeed
+            local appliedSpeed=nil
+            local function restoreSpeed()
+                if appliedSpeed and humanoid.Parent and humanoid.WalkSpeed==appliedSpeed then humanoid.WalkSpeed=normalSpeed end
                 appliedSpeed=nil
-            elseif not appliedSpeed then
-                normalSpeed=humanoid.WalkSpeed
             end
-            local velocity=root.AssemblyLinearVelocity
-            local actual=Vector3.new(velocity.X,0,velocity.Z).Magnitude
-            local distance=flatDistance(root.Position,target)
-            local brakeDistance=math.max(30,math.max(normalSpeed,actual)*0.45+20)
-            if distance<brakeDistance and normalSpeed>12 then
-                local limit=math.min(normalSpeed,math.max(2,math.sqrt(160*math.max(distance-arrivalRadius,0))))
-                humanoid.WalkSpeed=limit
-                appliedSpeed=limit
-            else
-                restoreSpeed()
-            end
-        end
-        local params=RaycastParams.new()
-        params.FilterType=Enum.RaycastFilterType.Exclude
-        local excluded={character}
-        if model then excluded[#excluded+1]=model end
-        params.FilterDescendantsInstances=excluded
-        params.RespectCanCollide=true
-        -- Cada pedido tem no maximo 300 studs, inclusive a diferenca de altura.
-        -- Se um trecho falhar, tenta 100 e depois 50 studs antes de desistir.
-        local function goalsFor(step, here)
-            local goals={}
-            here=here or root.Position
-            local distance=flatDistance(here,target)
-            local finalLeg=distance<=step
-            local function addGround(sample)
-                local hit=Workspace:Raycast(sample+Vector3.new(0,24,0),Vector3.new(0,-100,0),params)
-                if hit and hit.Normal.Y>=0.6 and (hit.Position-here).Magnitude<=300 then
-                    goals[#goals+1]=hit.Position
-                end
-            end
-            if finalLeg then
-                addGround(target)
-            else
-                local delta=Vector3.new(target.X-here.X,0,target.Z-here.Z).Unit
-                for _,degrees in ipairs({0,30,-30,60,-60}) do
-                    local angle=math.rad(degrees)
-                    local direction=Vector3.new(delta.X*math.cos(angle)-delta.Z*math.sin(angle),0,
-                        delta.X*math.sin(angle)+delta.Z*math.cos(angle))
-                    addGround(here+direction*step)
-                end
-            end
-            table.sort(goals,function(a,b)
-                if finalLeg then return (here-a).Magnitude<(here-b).Magnitude end
-                return flatDistance(a,target)<flatDistance(b,target)
-            end)
-            return goals,finalLeg
-        end
-        local heartbeat=game:GetService("RunService").Heartbeat
-        local function centerOnEgg()
+            collector.restoreSpeed=restoreSpeed
+            local initialDistance=flatDistance(root.Position,target)
+            local deadline=os.clock()+math.clamp(initialDistance/math.max(normalSpeed,1)*3+60,120,1800)
             local runService=game:GetService("RunService")
-            local binding="DiceRadarCenter_"..tostring(generation)
-            local untilTime=os.clock()+8
+            local binding="DiceRadarDirect_"..tostring(generation)
+            local bound=false
             local stableSince=nil
-            local centered=false
             local controlError=nil
-            local lastReport=0
-            -- MoveTo encerra perto do destino. Move continua comandando ate o
-            -- centro e roda depois dos controles padrao, que podem zerar Move.
-            humanoid:MoveTo(root.Position)
-            local ok,why=pcall(function()
-                runService:BindToRenderStep(binding,Enum.RenderPriority.Character.Value+1,function(dt)
-                    if controlError or not active() then return end
-                    local worked,problem=pcall(function()
-                        approachSpeed()
-                        local delta=Vector3.new(target.X-root.Position.X,0,target.Z-root.Position.Z)
-                        local distance=delta.Magnitude
+            local lastMessage=0
+            local progressPosition=root.Position
+            local progressTime=os.clock()
+            local failure="Caminhada interrompida"
+            local function cleanupMotion()
+                if bound then runService:UnbindFromRenderStep(binding);bound=false end
+                if humanoid.Parent then humanoid:Move(Vector3.zero,false) end
+            end
+            collector.returnMotionCleanup=cleanupMotion
+            bound=true
+            runService:BindToRenderStep(binding,Enum.RenderPriority.Character.Value+1,function(dt)
+                local success,problem=pcall(function()
+                    if not active() or controlError or arrived then humanoid:Move(Vector3.zero,false);return end
+                    if updateReturnCrossing() then humanoid:Move(Vector3.zero,false);return end
+                    local delta=Vector3.new(target.X-root.Position.X,0,target.Z-root.Position.Z)
+                    local distance=delta.Magnitude
+                    local verticalOK=math.abs(root.Position.Y-target.Y)<=verticalTolerance
+                    if not returning then
+                        -- So a ida freia e centraliza; a volta preserva a velocidade do jogo.
+                        if appliedSpeed and humanoid.WalkSpeed~=appliedSpeed then normalSpeed=humanoid.WalkSpeed;appliedSpeed=nil
+                        elseif not appliedSpeed then normalSpeed=humanoid.WalkSpeed end
                         local velocity=root.AssemblyLinearVelocity
                         local actual=Vector3.new(velocity.X,0,velocity.Z).Magnitude
+                        local brakeDistance=math.max(30,math.max(normalSpeed,actual)*0.45+20)
                         if distance<=arrivalRadius then
-                            humanoid:Move(Vector3.new(0,0,0),false)
-                            if actual<0.3 and math.abs(root.Position.Y-target.Y)<=verticalTolerance then
+                            humanoid:Move(Vector3.zero,false)
+                            if verticalOK and actual<0.3 then
                                 stableSince=stableSince or os.clock()
-                                centered=os.clock()-stableSince>=0.15
-                            else
-                                stableSince=nil
-                            end
-                        else
-                            stableSince=nil
-                            -- Reduz o passo junto com o erro para nao oscilar
-                            -- de um lado para outro no ultimo frame.
-                            local speed=math.min(normalSpeed,6,distance*0.35/math.max(dt,1/240))
-                            humanoid.WalkSpeed=speed
-                            appliedSpeed=speed
-                            humanoid:Move(delta.Unit,false)
+                                arrived=os.clock()-stableSince>=0.15
+                            else stableSince=nil end
+                            return
                         end
-                        if os.clock()-lastReport>=0.2 then
-                            lastReport=os.clock()
-                            collectionMessage(string.format("Centralizando no ovo | erro X/Z: %.3f studs | velocidade: %.2f",distance,actual))
-                        end
-                    end)
-                    if not worked then controlError=problem end
+                        stableSince=nil
+                        if distance<4 then
+                            appliedSpeed=math.min(normalSpeed,6,distance*0.35/math.max(dt,1/240))
+                            humanoid.WalkSpeed=appliedSpeed
+                        elseif distance<brakeDistance and normalSpeed>12 then
+                            appliedSpeed=math.min(normalSpeed,math.max(2,math.sqrt(160*math.max(distance-arrivalRadius,0))))
+                            humanoid.WalkSpeed=appliedSpeed
+                        else restoreSpeed() end
+                    end
+                    if distance>0 then humanoid:Move(delta.Unit,false) end
                 end)
-                while active() and not centered and not controlError and os.clock()<untilTime do heartbeat:Wait() end
+                if not success then controlError=tostring(problem) end
             end)
-            runService:UnbindFromRenderStep(binding)
-            pcall(function() humanoid:Move(Vector3.new(0,0,0),false) end)
-            if not ok or controlError then error(tostring(controlError or why),0) end
-            return centered and active(),string.format("Centro nao alcancado | erro X/Z: %.3f studs",flatDistance(root.Position,target))
-        end
-        local function settleAt(point,radius)
-            collectionMessage("Freando e estabilizando perto do destino...")
-            local untilTime=os.clock()+1.2
-            local stableSince=nil
-            while active() and os.clock()<untilTime do
-                approachSpeed()
-                humanoid:MoveTo(root.Position)
-                humanoid:Move(Vector3.new(0,0,0),false)
-                heartbeat:Wait()
-                local velocity=root.AssemblyLinearVelocity
-                local stopped=Vector3.new(velocity.X,0,velocity.Z).Magnitude<2
-                if reached(point,radius) and stopped then
-                    stableSince=stableSince or os.clock()
-                    if os.clock()-stableSince>=0.2 then return true end
-                else
-                    stableSince=nil
-                end
-            end
-            return false
-        end
-        -- Remove apenas pontos praticamente colineares; preserva curvas e saltos.
-        local function simplifyRoute(points)
-            if #points<3 then return points end
-            local result={points[1]}
-            for i=2,#points-1 do
-                local a,b,c=result[#result],points[i],points[i+1]
-                local ab,bc=b.Position-a.Position,c.Position-b.Position
-                local ac=c.Position-a.Position
-                local removable=false
-                if a.Action~=Enum.PathWaypointAction.Jump and b.Action~=Enum.PathWaypointAction.Jump
-                    and c.Action~=Enum.PathWaypointAction.Jump and ab.Magnitude>0 and bc.Magnitude>0
-                    and ac.Magnitude>0 and ab.Unit:Dot(bc.Unit)>0.9995 then
-                    local t=math.clamp(ab:Dot(ac)/ac:Dot(ac),0,1)
-                    removable=(b.Position-(a.Position+ac*t)).Magnitude<=0.05
-                end
-                if not removable then result[#result+1]=b end
-            end
-            result[#result+1]=points[#points]
-            return result
-        end
-        -- Considera o segmento percorrido entre frames, nao apenas a posicao final.
-        local function crossedPoint(previous,current,point,radius)
-            local delta=Vector3.new(current.X-previous.X,0,current.Z-previous.Z)
-            local offset=Vector3.new(point.X-previous.X,0,point.Z-previous.Z)
-            local lengthSquared=delta:Dot(delta)
-            if lengthSquared<0.0001 then return false end
-            local t=math.clamp(offset:Dot(delta)/lengthSquared,0,1)
-            local closest=previous+(current-previous)*t
-            return flatDistance(closest,point)<=radius
-                and math.abs(closest.Y-point.Y)<=verticalTolerance
-        end
-        local initialDistance=(root.Position-target).Magnitude
-        local deadline=os.clock()+math.clamp(initialDistance/math.max(humanoid.WalkSpeed,1)*3+60,120,1800)
-        local arrived=false
-        local failure="nenhuma rota calculada"
-        local stagnant=0
-        local prepared=nil
-        if returning and returnSeed and reached(returnSeed.start,8) then
-            prepared={done=true,start=returnSeed.start,route=returnSeed}
-        end
-        returnSeed=nil
-        local lastRoute=nil
-        local planId=0
-        local function calculateRoute(start, valid)
-            local reason="nenhuma rota calculada"
-            for _,step in ipairs({math.clamp(humanoid.WalkSpeed*0.75,200,280),100,50}) do
-                if not valid() or os.clock()>=deadline then return nil,reason end
-                local goals,isFinal=goalsFor(step,start)
-                if #goals==0 then reason="CHAO AUSENTE no proximo trecho" end
-                for _,goal in ipairs(goals) do
-                    if not valid() or os.clock()>=deadline then return nil,reason end
-                    if (start-goal).Magnitude<=300 then
-                        local candidate=game:GetService("PathfindingService"):CreatePath({
-                            AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=12,
-                        })
-                        local ok,points=pcall(function()
-                            candidate:ComputeAsync(start,goal)
-                            if candidate.Status~=Enum.PathStatus.Success then
-                                error("SEM ROTA: "..tostring(candidate.Status),0)
-                            end
-                            return candidate:GetWaypoints()
-                        end)
-                        candidate:Destroy()
-                        if not valid() then return nil,"calculo cancelado" end
-                        if ok and #points>0 then
-                            return {start=start,goal=goal,points=simplifyRoute(points),final=isFinal}
-                        end
-                        reason=ok and "ROTA VAZIA" or tostring(points)
+            while active() and not arrived and not controlError and os.clock()<deadline do
+                if targetProvider then
+                    local latest=targetProvider()
+                    if not latest then failure="Alvo removido durante a ida";break end
+                    if (latest-target).Magnitude>0.1 then
+                        recordDiagnostic("destino_atualizado",{previous={target.X,target.Y,target.Z},current={latest.X,latest.Y,latest.Z}})
+                        target=latest;stableSince=nil;progressPosition=root.Position;progressTime=os.clock()
                     end
                 end
-            end
-            return nil,reason
-        end
-        for segment=1,160 do
-            if not active() or os.clock()>=deadline then break end
-            if updateReturnCrossing() then arrived=true;break end
-            if targetProvider then
-                local latest=targetProvider()
-                if not latest then failure="Alvo removido durante a ida";break end
-                if (latest-target).Magnitude>0.1 then
-                    recordDiagnostic("destino_atualizado",{previous={target.X,target.Y,target.Z},current={latest.X,latest.Y,latest.Z}})
-                    target=latest;prepared=nil;planId=planId+1
-                end
-            end
-            approachSpeed()
-            if not returning and reached(target,4) then
-                arrived,failure=centerOnEgg()
-                break
-            end
-            if reached(target,arrivalRadius) and (returning or settleAt(target,arrivalRadius)) then
-                arrived=true;break
-            end
-            local segmentStart=root.Position
-            local route
-            -- Usa o trecho pronto apenas se ainda estivermos na entrada prevista.
-            if prepared and prepared.done and prepared.route and reached(prepared.start,math.clamp(humanoid.WalkSpeed/60+3,5,12)) then
-                route=prepared.route
-            end
-            planId=planId+1
-            prepared=nil
-            if not route then
-                collectionMessage(string.format("Calculando trecho %d | faltam %.0f studs",
-                    segment,flatDistance(root.Position,target)))
-                local why
-                local calculationStarted=os.clock()
-                route,why=calculateRoute(root.Position,active)
-                if returning then
-                    local waited=os.clock()-calculationStarted
-                    diagnostics.maxPlanWait=math.max(diagnostics.maxPlanWait,waited)
-                    recordDiagnostic("espera_rota",{segment=segment,duration=waited,success=route~=nil})
-                end
-                if why then failure=why end
-            end
-            if updateReturnCrossing() then arrived=true;break end
-            if not active() or not route then break end
-            lastRoute=route
-            returnRouteInvalid=false
-            returnGoalCommand=nil;returnMoveGoal=nil;returnGoalPassed=false
-            local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
-            local goalRadius=finalLeg and (returning and arrivalRadius or 2.5) or 3
-            local segmentReached=false
-            local targetMoved=false
-            if not finalLeg then
-                local id=planId
-                local job={start=selectedGoal,done=false}
-                prepared=job
-                -- Calcula em paralelo com a caminhada, sem emitir comandos de movimento.
-                task.spawn(function()
-                    local function valid()
-                        return active() and not collector.finished and id==planId
-                    end
-                    local ok,result=pcall(calculateRoute,job.start,valid)
-                    if valid() then
-                        job.route=ok and result or nil
-                        job.done=true
-                    end
-                end)
-            end
-            local firstWaypoint=(#waypoints>1) and 2 or 1
-            if returning and returnDirection.Magnitude>0 then
-                local position=root.Position
-                local first=waypoints[firstWaypoint]
-                local function horizontalOffset(point)
-                    return Vector3.new(point.X-position.X,0,point.Z-position.Z)
-                end
-                local offset=first and horizontalOffset(first.Position)
-                -- ComputeAsync pode terminar quando os primeiros pontos ja ficaram atras.
-                if offset and offset.Magnitude>3 and offset.Unit:Dot(returnDirection)<-0.15
-                    and offset.Magnitude<=math.max(40,humanoid.WalkSpeed*0.5) then
-                    local forwardIndex=nil
-                    for index=firstWaypoint,#waypoints do
-                        local point=waypoints[index]
-                        if point.Action==Enum.PathWaypointAction.Jump then break end
-                        local delta=horizontalOffset(point.Position)
-                        if delta.Magnitude>3 and delta.Unit:Dot(returnDirection)>0.15
-                            and math.abs(point.Position.Y-position.Y)<=verticalTolerance then
-                            forwardIndex=index;break
-                        end
-                    end
-                    local clear=forwardIndex~=nil
-                    if clear then
-                        local delta=horizontalOffset(waypoints[forwardIndex].Position)
-                        local side=Vector3.new(-delta.Z,0,delta.X).Unit*2
-                        for _,shift in ipairs({Vector3.zero,side,-side}) do
-                            if Workspace:Raycast(position+shift,delta,params) then clear=false;break end
-                        end
-                        -- Nao encurta por cima de buracos ou desniveis incompatíveis.
-                        if clear then
-                            for distance=0,delta.Magnitude,12 do
-                                local sample=position+delta.Unit*distance
-                                local ground=Workspace:Raycast(sample+Vector3.new(0,8,0),Vector3.new(0,-24,0),params)
-                                if not ground or ground.Normal.Y<0.6
-                                    or math.abs(ground.Position.Y-(position.Y-humanoid.HipHeight-root.Size.Y/2))>6 then
-                                    clear=false;break
-                                end
-                            end
-                        end
-                    end
-                    if clear then
-                        firstWaypoint=forwardIndex
-                        recordDiagnostic("prefixo_atras_descartado",{segment=segment,nextIndex=firstWaypoint,
-                            alignment=offset.Unit:Dot(returnDirection),distance=offset.Magnitude})
-                    else
-                        -- Nunca gira para um prefixo velho enquanto outro trajeto e calculado.
-                        returnRouteInvalid=true;prepared=nil;planId=planId+1
-                        recordDiagnostic("prefixo_atras_recalcular",{segment=segment,distance=offset.Magnitude})
-                    end
-                end
-            end
-            -- O primeiro ponto e a origem do calculo, nao um destino para voltar.
-            -- Preserva uma eventual acao de salto na origem.
-            if waypoints[1] and waypoints[1].Action==Enum.PathWaypointAction.Jump then
-                humanoid.Jump=true
-            end
-            for index=firstWaypoint,#waypoints do
-                if returnRouteInvalid then break end
-                local point=waypoints[index]
-                if not active() or os.clock()>=deadline then break end
-                if updateReturnCrossing() then segmentReached=true;break end
-                if reached(selectedGoal,goalRadius) then segmentReached=true;break end
-                -- Antecipa o proximo destino em retas; conserva precisao nas curvas/pulos.
-                local reachRadius=2.5
-                if finalLeg and index==#waypoints then reachRadius=goalRadius end
-                local nextPoint=waypoints[index+1]
-                local previousPoint=waypoints[index-1]
-                if nextPoint and previousPoint and point.Action~=Enum.PathWaypointAction.Jump
-                    and nextPoint.Action~=Enum.PathWaypointAction.Jump then
-                    local incoming=point.Position-previousPoint.Position
-                    local outgoing=nextPoint.Position-point.Position
-                    if incoming.Magnitude>0 and outgoing.Magnitude>0
-                        and incoming.Unit:Dot(outgoing.Unit)>0.95 then
-                        reachRadius=math.min(math.clamp(humanoid.WalkSpeed*0.06,3,18),
-                            incoming.Magnitude*0.25,outgoing.Magnitude*0.25)
-                    end
-                end
-                local alreadyPassed=false
-                if returning and previousPoint and point.Action~=Enum.PathWaypointAction.Jump then
-                    local axis=Vector3.new(point.Position.X-previousPoint.Position.X,0,point.Position.Z-previousPoint.Position.Z)
-                    local offset=Vector3.new(root.Position.X-point.Position.X,0,root.Position.Z-point.Position.Z)
-                    if axis.Magnitude>0 and offset:Dot(axis.Unit)>=0 then
-                        local lateral=(offset-axis.Unit*offset:Dot(axis.Unit)).Magnitude
-                        if math.abs(root.Position.Y-point.Position.Y)<=verticalTolerance
-                            and lateral<=math.clamp(humanoid.WalkSpeed*0.1,6,36) then
-                            alreadyPassed=true
-                            if index==#waypoints then segmentReached=true end
-                            recordDiagnostic("waypoint_antigo_ignorado",{segment=segment,index=index,lateral=lateral})
-                        else
-                            returnRouteInvalid=true;prepared=nil;planId=planId+1
-                            recordDiagnostic("rota_antiga_descartada",{segment=segment,index=index,lateral=lateral})
-                            break
-                        end
-                    end
-                end
-                approachSpeed()
-                if not alreadyPassed and not reached(point.Position,reachRadius) then
-                    if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
-                    collectionMessage(string.format((returning and "Voltando" or "Indo")..": trecho %d | ponto %d/%d | faltam %.0f studs",
-                        segment,index,#waypoints,flatDistance(root.Position,target)))
-                    moveToward(point.Position)
-                    if returning then
-                        local velocity=root.AssemblyLinearVelocity
-                        local offset=point.Position-root.Position
-                        local horizontal=Vector3.new(offset.X,0,offset.Z)
-                        local physical=Vector3.new(velocity.X,0,velocity.Z)
-                        recordDiagnostic("waypoint",{segment=segment,index=index,
-                            target={point.Position.X,point.Position.Y,point.Position.Z},
-                            walkSpeed=humanoid.WalkSpeed,actual=physical.Magnitude,
-                            alignment=horizontal.Magnitude>0 and physical.Magnitude>2
-                                and horizontal.Unit:Dot(physical.Unit) or nil})
-                    end
-                    local timeout=math.min(deadline,os.clock()+8)
-                    local nextMove=os.clock()+0.2
-                    local startPosition=root.Position
-                    local previousPosition=root.Position
-                    local progressPosition=root.Position
-                    local progressTime=os.clock()
-                    local bestWaypointDistance=flatDistance(root.Position,point.Position)
-                    local closerTime=os.clock()
-                    local passed=false
-                    while active() and os.clock()<timeout and not passed and not reached(point.Position,reachRadius) do
-                        if updateReturnCrossing() then segmentReached=true;break end
-                        if returning and returnRouteInvalid then
-                            prepared=nil;planId=planId+1;break
-                        end
-                        if returning and returnGoalPassed then
-                            passed=true
-                            if index==#waypoints then segmentReached=true end
-                            break
-                        end
-                        approachSpeed()
-                        if reached(selectedGoal,goalRadius) then segmentReached=true;break end
-                        if os.clock()>=nextMove then moveToward(point.Position);nextMove=os.clock()+0.2 end
-                        heartbeat:Wait()
-                        local currentPosition=root.Position
-                        local waypointDistance=flatDistance(currentPosition,point.Position)
-                        if waypointDistance<bestWaypointDistance-1 then
-                            bestWaypointDistance=waypointDistance;closerTime=os.clock()
-                        elseif returning and os.clock()-closerTime>=1 then
-                            returnRouteInvalid=true;prepared=nil;planId=planId+1
-                            recordDiagnostic("recalculo_sem_aproximacao",{distance=waypointDistance,
-                                best=bestWaypointDistance,position={currentPosition.X,currentPosition.Y,currentPosition.Z}})
-                            break
-                        end
-                        if flatDistance(currentPosition,progressPosition)>=1 then
-                            progressPosition=currentPosition;progressTime=os.clock()
-                        elseif os.clock()-progressTime>=0.75 then
-                            prepared=nil;planId=planId+1
-                            recordDiagnostic("recalculo_sem_progresso",{duration=os.clock()-progressTime,
-                                position={currentPosition.X,currentPosition.Y,currentPosition.Z}})
-                            break
-                        end
-                        if targetProvider then
-                            local latest=targetProvider()
-                            if not latest or (latest-target).Magnitude>0.1 then
-                                targetMoved=true;prepared=nil;planId=planId+1
-                                recordDiagnostic("alvo_mudou_durante_trecho",{})
-                                break
-                            end
-                        end
-                        -- Inclui o ultimo ponto: antes ele podia ser ultrapassado e
-                        -- receber MoveTo para tras a cada renovacao do comando.
-                        if point.Action~=Enum.PathWaypointAction.Jump then
-                            passed=crossedPoint(previousPosition,currentPosition,point.Position,reachRadius)
-                        end
-                        if index==#waypoints and passed then
-                            segmentReached=true
-                        end
-                        previousPosition=currentPosition
-                    end
-                    if targetMoved then break end
-                    if not active() or segmentReached or reached(selectedGoal,goalRadius) then
-                        if active() and reached(selectedGoal,goalRadius) then segmentReached=true end
+                local distance=flatDistance(root.Position,target)
+                if distance>4 then
+                    if flatDistance(root.Position,progressPosition)>=1 then
+                        progressPosition=root.Position;progressTime=os.clock()
+                    elseif os.clock()-progressTime>=0.75 then
+                        failure="Passagem direta bloqueada: sem progresso por 0.75s"
+                        recordDiagnostic("trajeto_direto_bloqueado",{position={root.Position.X,root.Position.Y,root.Position.Z}})
                         break
                     end
-                    if not passed and not reached(point.Position,reachRadius) then
-                        failure=string.format("TRAVOU no trecho %d, ponto %d/%d | andou %.1f studs | estado %s",
-                            segment,index,#waypoints,flatDistance(root.Position,startPosition),tostring(humanoid:GetState()))
-                        break
-                    end
+                else progressPosition=root.Position;progressTime=os.clock() end
+                if os.clock()-lastMessage>=0.25 then
+                    lastMessage=os.clock()
+                    collectionMessage(string.format((returning and "Voltando direto ao DEFAULT" or "Indo direto ao destino").." | faltam %.1f studs",distance))
                 end
+                runService.Heartbeat:Wait()
             end
-            if active() and not targetMoved and not returnRouteInvalid then
-                if updateReturnCrossing() then arrived=true;break end
-                if not returning and finalLeg and reached(target,4) then
-                    arrived,failure=centerOnEgg()
-                    break
-                end
-                if finalLeg and (segmentReached or reached(selectedGoal,goalRadius))
-                    or reached(target,arrivalRadius) then
-                    local stopPoint=target
-                    local stopRadius=arrivalRadius
-                    if returning or settleAt(stopPoint,stopRadius) then arrived=true;break end
-                    failure="Drift afastou do destino; corrigindo aproximacao"
-                    -- Recalcula a aproximacao se deslizou; nao inicia coleta nem volta ainda.
-                end
-                if flatDistance(root.Position,segmentStart)<2 then stagnant=stagnant+1 else stagnant=0 end
-                if stagnant>=3 then failure="SEM PROGRESSO apos 3 tentativas | "..failure;break end
-                if segment==160 then failure="Limite de 160 trechos atingido." end
-            end
+            cleanupMotion();collector.returnMotionCleanup=nil
+            restoreSpeed();collector.restoreSpeed=nil
+            if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
+            if controlError then error(controlError,0) end
+            if not arrived and os.clock()>=deadline then failure="Tempo de caminhada direta esgotado" end
+            return arrived,failure
         end
-        planId=planId+1
-        if not arrived and os.clock()>=deadline then failure="TEMPO TOTAL ESGOTADO | "..failure end
-        -- Reaproveita somente um trecho sem saltos, acabado de percorrer.
-        -- Saltos podem ser assimetricos; nesses casos calcula a volta normalmente.
-        if arrived and not returning and lastRoute and reached(lastRoute.goal,8) then
-            local reversible=true
-            for _,point in ipairs(lastRoute.points) do
-                if point.Action==Enum.PathWaypointAction.Jump then reversible=false;break end
-            end
-            if reversible and #lastRoute.points>1 then
-                local points={{Position=root.Position,Action=Enum.PathWaypointAction.Walk}}
-                for i=#lastRoute.points-1,1,-1 do
-                    points[#points+1]=lastRoute.points[i]
-                end
-                local goal=points[#points].Position
-                if flatDistance(root.Position,goal)>4 then
-                    returnSeed={start=root.Position,goal=goal,points=points,
-                        final=flatDistance(goal,origin)<=3 and math.abs(goal.Y-origin.Y)<=verticalTolerance}
-                end
-            end
-        end
-        cleanupReturnMotion()
-        if returning then collector.returnMotionCleanup=nil end
-        restoreSpeed()
-        collector.restoreSpeed=nil
-        if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
-        return arrived, failure
-        end -- walkTo: planejamento independente por perna da viagem
 
         local function promptPosition(prompt)
             local parent=prompt.Parent
@@ -3380,7 +2891,6 @@ local function runCollection(uid, model, rec)
         if not active() then return end
         if not atDefault then error("Nao chegou ao DEFAULT: "..tostring(defaultWhy),0) end
         -- A rota de preparacao nao e uma rota de retorno do ovo.
-        returnSeed=nil
         recordDiagnostic("default_alcancado",{position={root.Position.X,root.Position.Y,root.Position.Z}})
         local lastTargetRefresh=0
         local function refreshTarget(force)
@@ -3395,47 +2905,20 @@ local function runCollection(uid, model, rec)
             eggTarget=collectionDestination(model,rec)
             return eggTarget
         end
-        local function stagingTarget()
-            local destination=refreshTarget()
-            if not destination then return nil end
-            local direction=Vector3.new(destination.X-origin.X,0,destination.Z-origin.Z)
-            if direction.Magnitude<1 then return destination end
-            return destination-direction.Unit*math.min(80,direction.Magnitude/2)
-        end
         local currentDestination=refreshTarget(true)
         local arrived,why=false,"Alvo indisponivel antes da aproximacao"
         if currentDestination then
-            collectionMessage("Indo ao ponto de preparacao, antes do ovo...")
-            local staged,stageWhy=walkTo(stagingTarget(),false,stagingTarget)
-            returnSeed=nil
-            if staged and active() then
-                humanoid:MoveTo(root.Position)
-                collectionMessage("Aguardando ancora do ovo a distancia...")
-                local anchorDeadline=os.clock()+8
-                local ready=false
-                repeat
-                    local destination=refreshTarget(true)
-                    if not destination then break end
-                    promptAnchors.sample()
-                    local count=0
-                    for prompt,binding in pairs(promptAnchors.bindings) do
-                        if prompt.Parent and binding.uid==tostring(uid)
-                            and promptAnchors.valid(binding,promptAnchors.records,promptAnchors.models) then count=count+1 end
-                    end
-                    ready=count==1
-                    if ready then break end
-                    task.wait(0.25)
-                until not active() or os.clock()>=anchorDeadline
-                diagnostics.preparation={modelAvailable=model~=nil,anchorReady=ready,
-                    recordAvailable=rec~=nil,modelRequired=false}
-                recordDiagnostic("preparacao_ancora",diagnostics.preparation)
-                if ready and active() then
-                    local finalTarget=refreshTarget(true)
-                    if finalTarget then arrived,why=walkTo(finalTarget,false,refreshTarget)
-                    else why="Alvo removido apos preparar a ancora" end
-                else why="Ancora nao confirmada no ponto de preparacao" end
-            else why=stageWhy end
+            collectionMessage("Indo diretamente ao ovo; observando ancora durante a aproximacao...")
+            arrived,why=walkTo(currentDestination,false,refreshTarget)
         end
+        local anchorCount=0
+        for prompt,binding in pairs(promptAnchors.bindings) do
+            if prompt.Parent and binding.uid==tostring(uid)
+                and promptAnchors.valid(binding,promptAnchors.records,promptAnchors.models) then anchorCount=anchorCount+1 end
+        end
+        diagnostics.preparation={modelAvailable=model~=nil,recordAvailable=rec~=nil,
+            modelRequired=false,anchorReady=anchorCount==1,direct=true}
+        recordDiagnostic("preparacao_ancora",diagnostics.preparation)
         if not active() then return end
         local outcome="Ida interrompida: "..tostring(why)
         if arrived then
