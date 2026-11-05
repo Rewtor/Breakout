@@ -2017,81 +2017,111 @@ local function runCollection(uid, model, rec)
         if model then excluded[#excluded+1]=model end
         params.FilterDescendantsInstances=excluded
         params.RespectCanCollide=true
-        local goals={}
-        for _,radius in ipairs({5,9}) do
-            for i=0,7 do
-                local angle=i*math.pi/4
-                local sample=target+Vector3.new(math.cos(angle)*radius,12,math.sin(angle)*radius)
-                local hit=Workspace:Raycast(sample,Vector3.new(0,-60,0),params)
-                if hit and hit.Normal.Y>=0.6 then goals[#goals+1]=hit.Position end
-            end
-        end
-        if #goals==0 then
-            error(string.format("CHAO AUSENTE perto do ovo | distancia %.0f studs | alvo Y %.1f | personagem Y %.1f",
-                (root.Position-target).Magnitude,target.Y,root.Position.Y),0)
-        end
-        table.sort(goals,function(a,b) return (root.Position-a).Magnitude<(root.Position-b).Magnitude end)
-        local initialDistance=(root.Position-target).Magnitude
-        local deadline=os.clock()+math.clamp(initialDistance/math.max(humanoid.WalkSpeed,1)*2+30,60,300)
-        local arrived=false
-        local failure="nenhuma rota calculada"
-        local selectedGoal
-        for round=1,3 do
-            if not active() or os.clock()>=deadline then break end
-            local waypoints
-            for index,goal in ipairs(goals) do
-                if not active() or os.clock()>=deadline then break end
-                if reached(goal,3) then arrived=true;selectedGoal=goal;break end
-                collectionMessage(string.format("Calculando rota %d/3, acesso %d/%d | %.0f studs",round,index,#goals,(root.Position-goal).Magnitude))
-                path=game:GetService("PathfindingService"):CreatePath({
-                    AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=4,
-                })
-                local computed,detail=pcall(function() path:ComputeAsync(root.Position,goal) end)
-                if not active() then break end
-                if computed and path.Status==Enum.PathStatus.Success then
-                    waypoints=path:GetWaypoints()
-                    selectedGoal=goal
-                    path:Destroy();path=nil
-                    if #waypoints>0 then break end
-                    failure="ROTA VAZIA"
-                    waypoints=nil
-                else
-                    failure=computed and ("SEM ROTA: "..tostring(path.Status))
-                        or ("ERRO AO CALCULAR: "..tostring(detail))
-                    path:Destroy();path=nil
+        -- Cada pedido tem no maximo 300 studs, inclusive a diferenca de altura.
+        -- Se um trecho falhar, tenta 100 e depois 50 studs antes de desistir.
+        local function goalsFor(step)
+            local goals={}
+            local here=root.Position
+            local distance=flatDistance(here,target)
+            local finalLeg=distance<=step
+            local function addGround(sample)
+                local hit=Workspace:Raycast(sample+Vector3.new(0,24,0),Vector3.new(0,-100,0),params)
+                if hit and hit.Normal.Y>=0.6 and (hit.Position-here).Magnitude<=300 then
+                    goals[#goals+1]=hit.Position
                 end
             end
-            if arrived or not active() then break end
-            if not waypoints then break end
+            if finalLeg then
+                for _,radius in ipairs({5,9}) do
+                    for i=0,7 do
+                        local angle=i*math.pi/4
+                        addGround(target+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius))
+                    end
+                end
+            else
+                local delta=Vector3.new(target.X-here.X,0,target.Z-here.Z).Unit
+                for _,degrees in ipairs({0,30,-30,60,-60}) do
+                    local angle=math.rad(degrees)
+                    local direction=Vector3.new(delta.X*math.cos(angle)-delta.Z*math.sin(angle),0,
+                        delta.X*math.sin(angle)+delta.Z*math.cos(angle))
+                    addGround(here+direction*step)
+                end
+            end
+            table.sort(goals,function(a,b)
+                if finalLeg then return (here-a).Magnitude<(here-b).Magnitude end
+                return flatDistance(a,target)<flatDistance(b,target)
+            end)
+            return goals,finalLeg
+        end
+        local initialDistance=(root.Position-target).Magnitude
+        local deadline=os.clock()+math.clamp(initialDistance/math.max(humanoid.WalkSpeed,1)*3+60,120,1800)
+        local arrived=false
+        local failure="nenhuma rota calculada"
+        local stagnant=0
+        for segment=1,160 do
+            if not active() or os.clock()>=deadline then break end
+            if reached(target,12) then arrived=true;break end
+            local segmentStart=root.Position
+            local waypoints,selectedGoal,finalLeg
+            for _,step in ipairs({200,100,50}) do
+                if not active() or os.clock()>=deadline then break end
+                local goals,isFinal=goalsFor(step)
+                if #goals==0 then failure="CHAO AUSENTE no proximo trecho | faltam "..math.floor(flatDistance(root.Position,target)).." studs" end
+                for index,goal in ipairs(goals) do
+                    if not active() or os.clock()>=deadline then break end
+                    local start=root.Position
+                    if (start-goal).Magnitude<=300 then
+                        collectionMessage(string.format("Trecho %d: calculando %d studs | faltam %.0f ate o ovo",
+                            segment,math.floor((start-goal).Magnitude),flatDistance(start,target)))
+                        path=game:GetService("PathfindingService"):CreatePath({
+                            AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=4,
+                        })
+                        local computed,detail=pcall(function() path:ComputeAsync(start,goal) end)
+                        if not active() then break end
+                        if computed and path.Status==Enum.PathStatus.Success then
+                            local points=path:GetWaypoints()
+                            if #points>0 then waypoints,selectedGoal,finalLeg=points,goal,isFinal end
+                            if not waypoints then failure="ROTA VAZIA" end
+                        else
+                            failure=computed and ("SEM ROTA: "..tostring(path.Status))
+                                or ("ERRO AO CALCULAR TRECHO DE "..math.floor((start-goal).Magnitude).." STUDS: "..tostring(detail))
+                        end
+                        path:Destroy();path=nil
+                        if waypoints then break end
+                    else failure="Personagem deslocado antes do calculo; destino do trecho ficou distante." end
+                end
+                if waypoints then break end
+            end
+            if not active() or not waypoints then break end
             for index,point in ipairs(waypoints) do
                 if not active() or os.clock()>=deadline then break end
-                if reached(selectedGoal,3) then arrived=true;break end
+                if reached(selectedGoal,3) then break end
                 if not reached(point.Position,2.5) then
                     if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
-                    collectionMessage(string.format("Andando: ponto %d/%d | faltam %.0f studs",index,#waypoints,flatDistance(root.Position,selectedGoal)))
+                    collectionMessage(string.format("Andando: trecho %d | ponto %d/%d | faltam %.0f studs",
+                        segment,index,#waypoints,flatDistance(root.Position,target)))
                     humanoid:MoveTo(point.Position)
                     local timeout=math.min(deadline,os.clock()+8)
                     local nextMove=os.clock()+1
                     local startPosition=root.Position
                     while active() and os.clock()<timeout and not reached(point.Position,2.5) do
-                        if reached(selectedGoal,3) then arrived=true;break end
-                        if os.clock()>=nextMove then
-                            humanoid:MoveTo(point.Position)
-                            nextMove=os.clock()+1
-                        end
+                        if reached(selectedGoal,3) then break end
+                        if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+1 end
                         task.wait(0.1)
                     end
-                    if arrived or not active() then break end
+                    if not active() or reached(selectedGoal,3) then break end
                     if not reached(point.Position,2.5) then
-                        failure=string.format("TRAVOU no ponto %d/%d | andou %.1f studs | falta %.1f | altura %.1f | estado %s",
-                            index,#waypoints,flatDistance(root.Position,startPosition),flatDistance(root.Position,point.Position),
-                            root.Position.Y-point.Position.Y,tostring(humanoid:GetState()))
+                        failure=string.format("TRAVOU no trecho %d, ponto %d/%d | andou %.1f studs | estado %s",
+                            segment,index,#waypoints,flatDistance(root.Position,startPosition),tostring(humanoid:GetState()))
                         break
                     end
                 end
             end
-            if active() and reached(selectedGoal,3) then arrived=true end
-            if arrived then break end
+            if active() then
+                if finalLeg and reached(selectedGoal,3) or reached(target,12) then arrived=true;break end
+                if flatDistance(root.Position,segmentStart)<2 then stagnant=stagnant+1 else stagnant=0 end
+                if stagnant>=3 then failure="SEM PROGRESSO apos 3 tentativas | "..failure;break end
+                if segment==160 then failure="Limite de 160 trechos atingido." end
+            end
         end
         if active() then
             if not arrived and os.clock()>=deadline then failure="TEMPO TOTAL ESGOTADO | "..failure end
