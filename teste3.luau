@@ -1933,6 +1933,67 @@ local collectionStatus = text(settings, {
 local function collectionMessage(message)
     if alive then collectionStatus.Text = message end
 end
+do
+    local report=text(settings,{
+        Text="Diagnostico de prompts: aguardando uma viagem manual.",
+        Size=UDim2.new(1,-8,0,0),AutomaticSize=Enum.AutomaticSize.Y,
+        LayoutOrder=101,Visible=false,TextSize=12,
+    })
+    addButton("Mostrar / ocultar diagnostico de prompts",function()
+        report.Visible=not report.Visible
+    end)
+    addButton("Copiar diagnostico de prompts",function()
+        local data=collector.lastDiagnostics
+        if not data then collectionMessage("Ainda nao ha diagnostico de viagem.");return end
+        if setclipboard then
+            local ok=pcall(setclipboard,Http:JSONEncode(data))
+            collectionMessage(ok and "Diagnostico copiado. Pode colar no chat."
+                or "Nao foi possivel copiar. Consulte DiceRadar_UltimoTeste.json.")
+        else
+            collectionMessage("Executor sem clipboard. Consulte DiceRadar_UltimoTeste.json.")
+        end
+    end)
+    collector.renderDiagnostics=function(data)
+        local function pos(value)
+            return value and string.format("(%.2f, %.2f, %.2f)",value[1],value[2],value[3]) or "indisponivel"
+        end
+        local function distance(value)
+            return value and string.format("%.3f",value) or "indisponivel"
+        end
+        local target=data.promptTarget
+        local lines={"DIAGNOSTICO DE PROMPTS"}
+        if not target then
+            lines[#lines+1]="A viagem nao chegou a etapa de selecao do prompt."
+        else
+            lines[#lines+1]="Alvo: "..target.name.." | UID: "..target.uid
+            lines[#lines+1]="Modelo: "..target.model
+            lines[#lines+1]="BoundsCFrame: "..pos(target.bounds).." | BottomCFrame: "..pos(target.bottom)
+            lines[#lines+1]="Personagem: "..pos(target.character)
+            lines[#lines+1]=string.format("Registro atual: %s | candidatos aceitos: %d | prompts examinados: %d",
+                tostring(target.hasCurrentRecord),data.promptAccepted or 0,data.promptExamined or 0)
+            for index,item in ipairs(data.promptCandidates or {}) do
+                lines[#lines+1]=string.format("\n%d. %s | %s",index,item.name,item.verdict)
+                lines[#lines+1]=item.path
+                lines[#lines+1]="Posicao: "..pos(item.position)
+                lines[#lines+1]=string.format("Distancia Bounds: %s | personagem: %s | alcance: %.2f",
+                    distance(item.boundsDistance),distance(item.characterDistance),item.range)
+                lines[#lines+1]=string.format("Enabled: %s | exibido pela camera: %s | exige visao: %s",
+                    tostring(item.enabled),tostring(item.shown),tostring(item.requiresLineOfSight))
+                lines[#lines+1]="Identidade: "..item.identity.." | visao: "..item.lineOfSight
+                lines[#lines+1]="ActionText: "..item.actionText.." | ObjectText: "..item.objectText
+                if item.nearestEggUid then
+                    lines[#lines+1]="Ovo registrado mais proximo: "..item.nearestEggUid.." | distancia: "..distance(item.nearestEggDistance)
+                end
+                if item.blocker then lines[#lines+1]="Obstaculo do raycast: "..item.blocker end
+                for _,owner in ipairs(item.owners or {}) do
+                    lines[#lines+1]="Atributos de "..owner.path..": "..Http:JSONEncode(owner.attributes)
+                end
+            end
+        end
+        report.Text=table.concat(lines,"\n")
+        report.Visible=true
+    end
+end
 stopCollection = function()
     if collector.restoreSpeed then collector.restoreSpeed() end
     if collector.cleanup then collector.cleanup() end
@@ -2528,35 +2589,69 @@ local function runCollection(uid, model, rec)
             local candidates={}
             local rejected={}
             local inspected={}
+            local observations={}
+            local boundsPosition=nil
+            local function coordinates(position)
+                return position and {position.X,position.Y,position.Z} or nil
+            end
             spatialChoice=nil
             local function add(prompt)
                 if inspected[prompt] then return end
                 inspected[prompt]=true
-                if not prompt:IsA("ProximityPrompt") or not prompt.Enabled then return end
-                if prompt.Name~="CarryAreaEgg" and prompt.Name~="StealPrompt" then return end
-                local belongs,reason=belongsToSelectedEgg(prompt)
-                if not belongs then
-                    rejected[#rejected+1]={path=prompt:GetFullName(),reason=reason}
-                    return
-                end
+                if not prompt:IsA("ProximityPrompt") then return end
                 local position=promptPosition(prompt)
-                if not position or (root.Position-position).Magnitude>prompt.MaxActivationDistance then return end
-                if prompt.RequiresLineOfSight then
+                local _,identity=belongsToSelectedEgg(prompt,true)
+                local observation={name=prompt.Name,path=prompt:GetFullName(),position=coordinates(position),
+                    boundsDistance=position and boundsPosition and (position-boundsPosition).Magnitude or nil,
+                    characterDistance=position and (root.Position-position).Magnitude or nil,
+                    range=prompt.MaxActivationDistance,enabled=prompt.Enabled,shown=shown[prompt]==true,
+                    actionText=prompt.ActionText,objectText=prompt.ObjectText,
+                    requiresLineOfSight=prompt.RequiresLineOfSight,identity=identity,
+                    lineOfSight="nao avaliada",verdict="nao avaliado",instance=prompt}
+                observations[#observations+1]=observation
+                if not prompt.Enabled then observation.verdict="rejeitado: desativado";return end
+                if prompt.Name~="CarryAreaEgg" and prompt.Name~="StealPrompt" then
+                    observation.verdict="rejeitado: nome/tipo de prompt diferente";return
+                end
+                local blocked=false
+                if prompt.RequiresLineOfSight and position and observation.characterDistance<=prompt.MaxActivationDistance then
                     local rayParams=RaycastParams.new()
                     rayParams.FilterType=Enum.RaycastFilterType.Exclude
                     rayParams.FilterDescendantsInstances={character}
                     rayParams.RespectCanCollide=true
                     local hit=Workspace:Raycast(root.Position,position-root.Position,rayParams)
-                    if hit and (hit.Position-position).Magnitude>2
-                        and not (model and hit.Instance:IsDescendantOf(model)) then return end
+                    blocked=hit and (hit.Position-position).Magnitude>2
+                        and not (model and hit.Instance:IsDescendantOf(model)) or false
+                    observation.lineOfSight=blocked and "bloqueada" or "livre"
+                    observation.blocker=blocked and hit.Instance:GetFullName() or nil
+                elseif not prompt.RequiresLineOfSight then
+                    observation.lineOfSight="nao exigida"
+                elseif position then
+                    observation.lineOfSight="nao avaliada: fora do alcance"
                 end
+                local belongs,reason=belongsToSelectedEgg(prompt)
+                if not belongs then
+                    if reason=="sem vinculo com o alvo" then
+                        reason=reason..(spatialEggs[tostring(uid)]
+                            and "; nao e o prompt mais proximo elegivel" or "; BoundsCFrame atual indisponivel")
+                    end
+                    observation.verdict="rejeitado: "..reason
+                    rejected[#rejected+1]={path=prompt:GetFullName(),reason=reason}
+                    return
+                end
+                if not position then observation.verdict="rejeitado: posicao indisponivel";return end
+                if (root.Position-position).Magnitude>prompt.MaxActivationDistance then
+                    observation.verdict="rejeitado: fora do alcance";return
+                end
+                if blocked then observation.verdict="rejeitado: linha de visao bloqueada";return end
+                observation.verdict="aceito: "..reason
                 candidates[prompt]=true
             end
             -- Uma busca por chegada: nao depende de qual prompt a camera mostra.
             if not promptPool then
                 promptPool={}
                 for _,item in ipairs(Workspace:GetDescendants()) do
-                    if item:IsA("ProximityPrompt") and (item.Name=="CarryAreaEgg" or item.Name=="StealPrompt") then
+                    if item:IsA("ProximityPrompt") then
                         promptPool[#promptPool+1]=item
                     end
                 end
@@ -2571,6 +2666,15 @@ local function runCollection(uid, model, rec)
                 end
             end
             local targetPosition=spatialEggs[tostring(uid)]
+            boundsPosition=targetPosition
+            local targetRecord=currentRecords[tostring(uid)] or currentRecords[uid] or rec
+            local reportBounds=targetPosition or (targetRecord and typeof(targetRecord.BoundsCFrame)=="CFrame"
+                and targetRecord.BoundsCFrame.Position or nil)
+            boundsPosition=reportBounds
+            diagnostics.promptTarget={uid=tostring(uid),name=cached[uid] and cached[uid].C or "ovo",
+                model=model and model:GetFullName() or "indisponivel",bounds=coordinates(reportBounds),
+                bottom=targetRecord and typeof(targetRecord.BottomCFrame)=="CFrame" and coordinates(targetRecord.BottomCFrame.Position) or nil,
+                character=coordinates(root.Position),hasCurrentRecord=currentRecords[tostring(uid)]~=nil or currentRecords[uid]~=nil}
             local nearestDistance=math.huge
             if targetPosition then
                 for _,prompt in ipairs(promptPool) do
@@ -2591,6 +2695,47 @@ local function runCollection(uid, model, rec)
             for _,prompt in ipairs(promptPool) do if prompt.Parent then add(prompt) end end
             local selected,count=nil,0
             for prompt in pairs(candidates) do selected=prompt;count=count+1 end
+            table.sort(observations,function(a,b)
+                local da=a.boundsDistance or a.characterDistance or math.huge
+                local db=b.boundsDistance or b.characterDistance or math.huge
+                if da==db then return a.path<b.path end
+                return da<db
+            end)
+            diagnostics.promptExamined=#observations
+            diagnostics.promptAccepted=count
+            diagnostics.promptCandidates={}
+            for index=1,math.min(8,#observations) do
+                local observation=observations[index]
+                local position=promptPosition(observation.instance)
+                if position then
+                    local nearest=math.huge
+                    for otherUid,otherPosition in pairs(spatialEggs) do
+                        local distance=(position-otherPosition).Magnitude
+                        if distance<nearest then
+                            nearest=distance
+                            observation.nearestEggUid=otherUid
+                            observation.nearestEggDistance=distance
+                        end
+                    end
+                end
+                observation.owners={}
+                local owner=observation.instance
+                for depth=1,4 do
+                    if not owner or owner==Workspace then break end
+                    local attrs={}
+                    for key,value in pairs(owner:GetAttributes()) do
+                        local valueType=type(value)
+                        attrs[key]=(valueType=="string" or valueType=="boolean" or valueType=="number") and value or tostring(value)
+                    end
+                    observation.owners[#observation.owners+1]={path=owner:GetFullName(),attributes=attrs}
+                    owner=owner.Parent
+                end
+                observation.instance=nil
+                if count>1 and string.sub(observation.verdict,1,6)=="aceito" then
+                    observation.verdict="bloqueado: multiplos candidatos aceitos"
+                end
+                diagnostics.promptCandidates[#diagnostics.promptCandidates+1]=observation
+            end
             diagnostics.promptRejected=rejected
             return count==1 and selected or nil, count
         end
@@ -2675,6 +2820,10 @@ local function runCollection(uid, model, rec)
     pcall(function()
         if writefile then writefile("DiceRadar_UltimoTeste.json",Http:JSONEncode(diagnostics)) end
     end)
+    if alive and collector.renderDiagnostics then
+        local reportOK,reportError=pcall(collector.renderDiagnostics,diagnostics)
+        if not reportOK then warn("[Dice Radar] Falha no painel de diagnostico: "..tostring(reportError)) end
+    end
     if collector.restoreSpeed then collector.restoreSpeed();collector.restoreSpeed=nil end
     shownConnection:Disconnect()
     hiddenConnection:Disconnect()
