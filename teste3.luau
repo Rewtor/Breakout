@@ -1916,7 +1916,7 @@ local function updateEgg(uid, model, rec, now)
 end
 
 -- =========================================================
--- COLETA OPCIONAL: UMA TENTATIVA POR LOTE NOVO DE UIDS
+-- COLETA OPCIONAL: UMA VIAGEM DE IDA E VOLTA POR CLIQUE
 -- Renovacao inferida por UIDs novos; nao e um evento oficial do jogo.
 -- Nao afirma posse: Claimed/remoção podem ser causados por outro jogador.
 -- =========================================================
@@ -1948,7 +1948,7 @@ stopCollection = function()
     -- Busy so e liberado quando o worker antigo terminar.
     collectionMessage("Caminhada cancelada.")
 end
-addButton("TESTAR: andar ate o ovo mais caro", function()
+addButton("Coletar ovo mais caro e voltar", function()
     if collectorBusy then
         collectionMessage("Caminhada em andamento; cancele antes de iniciar outra.")
         return
@@ -1964,7 +1964,7 @@ addButton("TESTAR: andar ate o ovo mais caro", function()
     collector.pending = true
     collector.startedAt = os.clock()
     collector.changedAt = os.clock()
-    collectionMessage("Teste de caminhada: aguardando os ovos carregarem...")
+    collectionMessage("Ida e volta: aguardando os ovos carregarem...")
 end)
 addButton("Cancelar caminhada", stopCollection)
 
@@ -1987,7 +1987,10 @@ local function runCollection(uid, model, rec)
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     local root = character and character:FindFirstChild("HumanoidRootPart")
     collector.humanoid = humanoid
-    local path
+    local shown = {}
+    local promptService = game:GetService("ProximityPromptService")
+    local shownConnection = promptService.PromptShown:Connect(function(prompt) shown[prompt] = true end)
+    local hiddenConnection = promptService.PromptHidden:Connect(function(prompt) shown[prompt] = nil end)
     local function active()
         return alive and collector.enabled and not paused
             and generation == collector.generation
@@ -1999,8 +2002,11 @@ local function runCollection(uid, model, rec)
         if root.Anchored or humanoid.WalkSpeed <= 0 then
             error("personagem imobilizado; saia da esteira antes do teste", 0)
         end
-        local target = collectionDestination(model, rec)
-        if not target then error("ovo sem posicao", 0) end
+        local origin = root.Position
+        local eggTarget = collectionDestination(model, rec)
+        if not eggTarget then error("ovo sem posicao", 0) end
+        local function walkTo(target, returning)
+        local arrivalRadius = returning and 3 or 5
         local function flatDistance(a,b)
             local d=a-b
             return Vector3.new(d.X,0,d.Z).Magnitude
@@ -2030,8 +2036,10 @@ local function runCollection(uid, model, rec)
                     goals[#goals+1]=hit.Position
                 end
             end
-            if finalLeg then
-                for _,radius in ipairs({5,9}) do
+            if finalLeg and returning then
+                addGround(target)
+            elseif finalLeg then
+                for _,radius in ipairs({3,5}) do
                     for i=0,7 do
                         local angle=i*math.pi/4
                         addGround(target+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius))
@@ -2091,7 +2099,7 @@ local function runCollection(uid, model, rec)
         end
         for segment=1,160 do
             if not active() or os.clock()>=deadline then break end
-            if reached(target,12) then arrived=true;break end
+            if reached(target,arrivalRadius) then arrived=true;break end
             local segmentStart=root.Position
             local route
             -- Usa o trecho pronto apenas se ainda estivermos na entrada prevista.
@@ -2143,7 +2151,7 @@ local function runCollection(uid, model, rec)
                 end
                 if not reached(point.Position,reachRadius) then
                     if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
-                    collectionMessage(string.format("Andando: trecho %d | ponto %d/%d | faltam %.0f studs",
+                    collectionMessage(string.format((returning and "Voltando" or "Indo")..": trecho %d | ponto %d/%d | faltam %.0f studs",
                         segment,index,#waypoints,flatDistance(root.Position,target)))
                     humanoid:MoveTo(point.Position)
                     local timeout=math.min(deadline,os.clock()+8)
@@ -2163,23 +2171,112 @@ local function runCollection(uid, model, rec)
                 end
             end
             if active() then
-                if finalLeg and reached(selectedGoal,3) or reached(target,12) then arrived=true;break end
+                if finalLeg and reached(selectedGoal,3) or reached(target,arrivalRadius) then arrived=true;break end
                 if flatDistance(root.Position,segmentStart)<2 then stagnant=stagnant+1 else stagnant=0 end
                 if stagnant>=3 then failure="SEM PROGRESSO apos 3 tentativas | "..failure;break end
                 if segment==160 then failure="Limite de 160 trechos atingido." end
             end
         end
         planId=planId+1
+        if not arrived and os.clock()>=deadline then failure="TEMPO TOTAL ESGOTADO | "..failure end
+        return arrived, failure
+        end -- walkTo: planejamento independente por perna da viagem
+
+        local function promptPosition(prompt)
+            local parent=prompt.Parent
+            if not parent then return nil end
+            if parent:IsA("Attachment") then return parent.WorldPosition end
+            if parent:IsA("BasePart") then return parent.Position end
+            if parent:IsA("Model") then return parent:GetPivot().Position end
+        end
+        local function selectPrompt()
+            local candidates={}
+            local function add(prompt)
+                if not prompt:IsA("ProximityPrompt") or not prompt.Enabled then return end
+                local position=promptPosition(prompt)
+                if not position or (root.Position-position).Magnitude>prompt.MaxActivationDistance then return end
+                local belongs=model and model.Parent and prompt:IsDescendantOf(model)
+                -- Prompts fora do modelo so sao aceitos se visiveis, de roubo e perto do alvo.
+                if not belongs and not (shown[prompt] and prompt.Name=="StealPrompt"
+                    and (position-eggTarget).Magnitude<=10) then return end
+                if prompt.RequiresLineOfSight then
+                    local rayParams=RaycastParams.new()
+                    rayParams.FilterType=Enum.RaycastFilterType.Exclude
+                    rayParams.FilterDescendantsInstances={character}
+                    rayParams.RespectCanCollide=true
+                    local hit=Workspace:Raycast(root.Position,position-root.Position,rayParams)
+                    if hit and (hit.Position-position).Magnitude>2
+                        and not (model and hit.Instance:IsDescendantOf(model)) then return end
+                end
+                candidates[prompt]=true
+            end
+            if model and model.Parent then
+                for _,item in ipairs(model:GetDescendants()) do add(item) end
+            end
+            for prompt in pairs(shown) do add(prompt) end
+            local selected,count=nil,0
+            for prompt in pairs(candidates) do selected=prompt;count=count+1 end
+            return count==1 and selected or nil, count
+        end
+        local arrived,why=walkTo(eggTarget,false)
+        if not active() then return end
+        local outcome="Ida interrompida: "..tostring(why)
+        if arrived then
+            humanoid:MoveTo(root.Position)
+            collectionMessage("Perto do ovo: procurando interacao disponivel...")
+            local deadline=os.clock()+5
+            local prompt,count
+            repeat
+                prompt,count=selectPrompt()
+                if prompt or not active() then break end
+                task.wait(0.1)
+            until os.clock()>=deadline
+            if not active() then return end
+            outcome=count and count>1 and "Interacao ambigua; coleta nao tentada."
+                or "Sem prompt do ovo ao alcance; coleta nao tentada."
+            if prompt then
+                local triggered=false
+                local connection=prompt.Triggered:Connect(function(who)
+                    if who==player then triggered=true end
+                end)
+                collector.prompt=prompt
+                local interactionOK,interactionError=pcall(function()
+                    collectionMessage("Interagindo com o ovo...")
+                    prompt:InputHoldBegin()
+                    local holdUntil=os.clock()+prompt.HoldDuration+0.15
+                    while active() and prompt.Parent and prompt.Enabled and os.clock()<holdUntil do
+                        task.wait(0.05)
+                    end
+                    prompt:InputHoldEnd()
+                    local waitUntil=os.clock()+2
+                    while active() and not triggered and os.clock()<waitUntil do task.wait(0.05) end
+                end)
+                pcall(function() prompt:InputHoldEnd() end)
+                collector.prompt=nil
+                connection:Disconnect()
+                outcome=interactionOK and (triggered
+                    and "Interacao acionada; posse do ovo nao confirmada."
+                    or "Interacao sem confirmacao; verifique a coleta.")
+                    or "Falha na interacao: "..tostring(interactionError)
+            end
+        end
+        if not active() then return end
+        collectionMessage(outcome.." Voltando ao ponto de partida...")
+        local returned,returnWhy=walkTo(origin,true)
         if active() then
-            if not arrived and os.clock()>=deadline then failure="TEMPO TOTAL ESGOTADO | "..failure end
-            collectionMessage(arrived
-                and "Chegou perto do ovo. Teste encerrado: sem coletar e sem retornar."
-                or failure)
-        elseif alive and generation==collector.generation then
-            collectionMessage("Teste interrompido: personagem morreu, mudou ou radar foi pausado.")
+            collectionMessage(outcome..(returned and " Retorno concluido."
+                or " Retorno interrompido: "..tostring(returnWhy)))
         end
     end)
-    if path then path:Destroy() end
+    shownConnection:Disconnect()
+    hiddenConnection:Disconnect()
+    if collector.prompt then
+        pcall(function() collector.prompt:InputHoldEnd() end)
+        collector.prompt=nil
+    end
+    if alive and generation==collector.generation and not active() then
+        collectionMessage("Viagem interrompida: personagem morreu, mudou ou radar foi pausado.")
+    end
     if humanoid and humanoid.Parent and root and root.Parent then humanoid:MoveTo(root.Position) end
     if not ok and alive then collectionMessage("Falha na caminhada: "..tostring(err)) end
     collector.humanoid=nil
