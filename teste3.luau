@@ -2624,6 +2624,35 @@ local function runCollection(uid, model, rec)
                 end
             end
             if otherEggDistance-targetDistance<=separation then return false,"prompt mais perto de outro ovo ou empate" end
+            -- Um ovo grande pode colocar varios prompts mais perto do mesmo
+            -- BoundsCFrame. Nao desempata esse caso escolhendo o mais proximo.
+            -- Inclui prompts ocultos/desabilitados: visibilidade nao e identidade.
+            local competingPrompts=0
+            for _,candidate in ipairs(promptPool or {}) do
+                if candidate.Parent and candidate.Name=="CarryAreaEgg" then
+                    local identified,identityReason=belongsToSelectedEgg(candidate,true)
+                    local candidatePosition=promptPosition(candidate)
+                    if candidatePosition and (identified or identityReason=="sem vinculo com o alvo") then
+                        local distance=(candidatePosition-targetPosition).Magnitude
+                        if distance<=candidate.MaxActivationDistance then
+                            local nearestOther=math.huge
+                            for otherUid,otherPosition in pairs(spatialEggs) do
+                                if otherUid~=tostring(uid) then
+                                    nearestOther=math.min(nearestOther,(candidatePosition-otherPosition).Magnitude)
+                                end
+                            end
+                            if distance<=nearestOther+separation then
+                                competingPrompts=competingPrompts+1
+                            end
+                        end
+                    end
+                end
+            end
+            diagnostics.spatialAmbiguity={uid=tostring(uid),competingPrompts=competingPrompts,
+                blocked=competingPrompts>1}
+            if competingPrompts>1 then
+                return false,"sobreposicao ambigua: varios prompts apontam para o mesmo ovo; exige vinculo por UID/modelo"
+            end
             local otherPromptDistance=math.huge
             for _,otherPrompt in ipairs(promptPool or {}) do
                 if otherPrompt~=prompt and otherPrompt.Parent and otherPrompt.Enabled
