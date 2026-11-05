@@ -2016,7 +2016,8 @@ local function runCollection(uid, model, rec)
         local returnSeed=nil
         local function walkTo(target, returning)
         -- X/Z do ovo; Y da raiz permanece na altura fisica do personagem.
-        local arrivalRadius = returning and 3 or 0.75
+        -- MoveTo cuida da rota; o centro usa controle continuo, sem offset.
+        local arrivalRadius = returning and 3 or 0.03
         local function flatDistance(a,b)
             local d=a-b
             return Vector3.new(d.X,0,d.Z).Magnitude
@@ -2093,6 +2094,57 @@ local function runCollection(uid, model, rec)
             return goals,finalLeg
         end
         local heartbeat=game:GetService("RunService").Heartbeat
+        local function centerOnEgg()
+            local runService=game:GetService("RunService")
+            local binding="DiceRadarCenter_"..tostring(generation)
+            local untilTime=os.clock()+8
+            local stableSince=nil
+            local centered=false
+            local controlError=nil
+            local lastReport=0
+            -- MoveTo encerra perto do destino. Move continua comandando ate o
+            -- centro e roda depois dos controles padrao, que podem zerar Move.
+            humanoid:MoveTo(root.Position)
+            local ok,why=pcall(function()
+                runService:BindToRenderStep(binding,Enum.RenderPriority.Character.Value+1,function(dt)
+                    if controlError or not active() then return end
+                    local worked,problem=pcall(function()
+                        approachSpeed()
+                        local delta=Vector3.new(target.X-root.Position.X,0,target.Z-root.Position.Z)
+                        local distance=delta.Magnitude
+                        local velocity=root.AssemblyLinearVelocity
+                        local actual=Vector3.new(velocity.X,0,velocity.Z).Magnitude
+                        if distance<=arrivalRadius then
+                            humanoid:Move(Vector3.new(0,0,0),false)
+                            if actual<0.3 and math.abs(root.Position.Y-target.Y)<=verticalTolerance then
+                                stableSince=stableSince or os.clock()
+                                centered=os.clock()-stableSince>=0.15
+                            else
+                                stableSince=nil
+                            end
+                        else
+                            stableSince=nil
+                            -- Reduz o passo junto com o erro para nao oscilar
+                            -- de um lado para outro no ultimo frame.
+                            local speed=math.min(normalSpeed,6,distance*0.35/math.max(dt,1/240))
+                            humanoid.WalkSpeed=speed
+                            appliedSpeed=speed
+                            humanoid:Move(delta.Unit,false)
+                        end
+                        if os.clock()-lastReport>=0.2 then
+                            lastReport=os.clock()
+                            collectionMessage(string.format("Centralizando no ovo | erro X/Z: %.3f studs | velocidade: %.2f",distance,actual))
+                        end
+                    end)
+                    if not worked then controlError=problem end
+                end)
+                while active() and not centered and not controlError and os.clock()<untilTime do heartbeat:Wait() end
+            end)
+            runService:UnbindFromRenderStep(binding)
+            pcall(function() humanoid:Move(Vector3.new(0,0,0),false) end)
+            if not ok or controlError then error(tostring(controlError or why),0) end
+            return centered and active(),string.format("Centro nao alcancado | erro X/Z: %.3f studs",flatDistance(root.Position,target))
+        end
         local function settleAt(point,radius)
             collectionMessage("Freando e estabilizando perto do destino...")
             local untilTime=os.clock()+1.2
@@ -2189,6 +2241,10 @@ local function runCollection(uid, model, rec)
         for segment=1,160 do
             if not active() or os.clock()>=deadline then break end
             approachSpeed()
+            if not returning and reached(target,4) then
+                arrived,failure=centerOnEgg()
+                break
+            end
             if reached(target,arrivalRadius) and settleAt(target,arrivalRadius) then
                 arrived=true;break
             end
@@ -2210,7 +2266,7 @@ local function runCollection(uid, model, rec)
             if not active() or not route then break end
             lastRoute=route
             local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
-            local goalRadius=finalLeg and arrivalRadius or 3
+            local goalRadius=finalLeg and (returning and arrivalRadius or 2.5) or 3
             local segmentReached=false
             if not finalLeg then
                 local id=planId
@@ -2239,7 +2295,7 @@ local function runCollection(uid, model, rec)
                 if reached(selectedGoal,goalRadius) then segmentReached=true;break end
                 -- Antecipa o proximo destino em retas; conserva precisao nas curvas/pulos.
                 local reachRadius=2.5
-                if finalLeg and index==#waypoints then reachRadius=arrivalRadius end
+                if finalLeg and index==#waypoints then reachRadius=goalRadius end
                 local nextPoint=waypoints[index+1]
                 local previousPoint=waypoints[index-1]
                 if nextPoint and previousPoint and point.Action~=Enum.PathWaypointAction.Jump
@@ -2291,6 +2347,10 @@ local function runCollection(uid, model, rec)
                 end
             end
             if active() then
+                if not returning and finalLeg and reached(target,4) then
+                    arrived,failure=centerOnEgg()
+                    break
+                end
                 if finalLeg and (segmentReached or reached(selectedGoal,goalRadius))
                     or reached(target,arrivalRadius) then
                     local stopPoint=target
