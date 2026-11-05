@@ -2041,6 +2041,83 @@ local function startCollection(automatic)
     collectionMessage(automatic and "Automatico ligado: aguardando os valores dos ovos..."
         or "Ida e volta: aguardando os ovos carregarem...")
 end
+addButton("Copiar diagnostico dos modulos de ovos/prompts",function()
+    if collectorBusy then
+        collectionMessage("Aguarde terminar a viagem para investigar os modulos.");return
+    end
+    local report={kind="egg_prompt_modules",version=1,scripts={},loadedModules={},
+        note="Inventario e estruturas ja carregadas; nenhum modulo desconhecido foi executado."}
+    local function summarize(value,depth,seen)
+        local valueType=typeof(value)
+        if valueType=="Instance" then return {type=valueType,path=value:GetFullName(),class=value.ClassName} end
+        if type(value)~="table" then
+            if type(value)=="string" then return {type=valueType,value=value:sub(1,160)} end
+            if type(value)=="number" or type(value)=="boolean" then return {type=valueType,value=value} end
+            return {type=valueType}
+        end
+        if seen[value] then return {type="table",cycle=true} end
+        if depth<=0 then return {type="table"} end
+        seen[value]=true
+        local result={type="table",entries={}}
+        local count=0
+        for key,item in pairs(value) do
+            count=count+1
+            if count<=60 then
+                result.entries[#result.entries+1]={key=tostring(key),value=summarize(item,depth-1,seen)}
+            end
+        end
+        result.count=count
+        result.truncated=count>60
+        seen[value]=nil
+        return result
+    end
+    for name,value in pairs(modules) do
+        if name=="EggState" then report.loadedModules[name]=summarize(value,2,{}) end
+    end
+    local client=RS:FindFirstChild("Client")
+    local roots={RS}
+    local playerScripts=player:FindFirstChild("PlayerScripts")
+    if playerScripts then roots[#roots+1]=playerScripts end
+    for _,searchRoot in ipairs(roots) do
+        for _,object in ipairs(searchRoot:GetDescendants()) do
+            if object:IsA("ModuleScript") or object:IsA("LocalScript") then
+                local path=object:GetFullName()
+                local lower=path:lower()
+                local relevant=lower:find("prompt",1,true) or lower:find("carry",1,true)
+                    or lower:find("egg",1,true) or lower:find("steal",1,true)
+                if relevant or (client and object:IsDescendantOf(client)) then
+                    if #report.scripts<200 then
+                        local entry={path=path,class=object.ClassName,relevant=relevant~=nil}
+                        -- Source costuma ser protegido no cliente; registra essa limitacao.
+                        local readable,source=pcall(function() return object.Source end)
+                        entry.sourceReadable=readable and type(source)=="string" and #source>0
+                        if entry.sourceReadable and relevant then
+                            entry.matches={}
+                            local lineNumber=0
+                            for line in (source.."\n"):gmatch("(.-)\n") do
+                                lineNumber=lineNumber+1
+                                if line:find("SmartPrompt",1,true) or line:find("CarryAreaEgg",1,true)
+                                    or line:find("EggUid",1,true) or line:find("BoundsCFrame",1,true) then
+                                    if #entry.matches<30 then
+                                        entry.matches[#entry.matches+1]={line=lineNumber,text=line:sub(1,400)}
+                                    end
+                                end
+                            end
+                        end
+                        report.scripts[#report.scripts+1]=entry
+                    else report.truncated=true end
+                end
+            end
+        end
+    end
+    collector.lastModuleDiagnostics=report
+    local encoded=Http:JSONEncode(report)
+    local saved=writefile and pcall(function() writefile("DiceRadar_Modulos.json",encoded) end)
+    local copied=setclipboard and pcall(function() setclipboard(encoded) end)
+    collectionMessage(copied and "Diagnostico dos modulos copiado. Cole no chat."
+        or (saved and "Diagnostico salvo em DiceRadar_Modulos.json."
+        or "Clipboard/arquivo indisponiveis; diagnostico mantido nesta execucao."))
+end)
 addButton("Coletar ovo mais caro e voltar", function() startCollection(false) end)
 addButton("ATIVAR coleta automatica por renovacao", function() startCollection(true) end)
 addButton("DESLIGAR coleta / cancelar viagem", stopCollection)
