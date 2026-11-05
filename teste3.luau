@@ -2019,9 +2019,9 @@ local function runCollection(uid, model, rec)
         params.RespectCanCollide=true
         -- Cada pedido tem no maximo 300 studs, inclusive a diferenca de altura.
         -- Se um trecho falhar, tenta 100 e depois 50 studs antes de desistir.
-        local function goalsFor(step)
+        local function goalsFor(step, here)
             local goals={}
-            local here=root.Position
+            here=here or root.Position
             local distance=flatDistance(here,target)
             local finalLeg=distance<=step
             local function addGround(sample)
@@ -2057,41 +2057,74 @@ local function runCollection(uid, model, rec)
         local arrived=false
         local failure="nenhuma rota calculada"
         local stagnant=0
+        local prepared=nil
+        local planId=0
+        local function calculateRoute(start, valid)
+            local reason="nenhuma rota calculada"
+            for _,step in ipairs({200,100,50}) do
+                if not valid() or os.clock()>=deadline then return nil,reason end
+                local goals,isFinal=goalsFor(step,start)
+                if #goals==0 then reason="CHAO AUSENTE no proximo trecho" end
+                for _,goal in ipairs(goals) do
+                    if not valid() or os.clock()>=deadline then return nil,reason end
+                    if (start-goal).Magnitude<=300 then
+                        local candidate=game:GetService("PathfindingService"):CreatePath({
+                            AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=12,
+                        })
+                        local ok,points=pcall(function()
+                            candidate:ComputeAsync(start,goal)
+                            if candidate.Status~=Enum.PathStatus.Success then
+                                error("SEM ROTA: "..tostring(candidate.Status),0)
+                            end
+                            return candidate:GetWaypoints()
+                        end)
+                        candidate:Destroy()
+                        if not valid() then return nil,"calculo cancelado" end
+                        if ok and #points>0 then
+                            return {start=start,goal=goal,points=points,final=isFinal}
+                        end
+                        reason=ok and "ROTA VAZIA" or tostring(points)
+                    end
+                end
+            end
+            return nil,reason
+        end
         for segment=1,160 do
             if not active() or os.clock()>=deadline then break end
             if reached(target,12) then arrived=true;break end
             local segmentStart=root.Position
-            local waypoints,selectedGoal,finalLeg
-            for _,step in ipairs({200,100,50}) do
-                if not active() or os.clock()>=deadline then break end
-                local goals,isFinal=goalsFor(step)
-                if #goals==0 then failure="CHAO AUSENTE no proximo trecho | faltam "..math.floor(flatDistance(root.Position,target)).." studs" end
-                for index,goal in ipairs(goals) do
-                    if not active() or os.clock()>=deadline then break end
-                    local start=root.Position
-                    if (start-goal).Magnitude<=300 then
-                        collectionMessage(string.format("Trecho %d: calculando %d studs | faltam %.0f ate o ovo",
-                            segment,math.floor((start-goal).Magnitude),flatDistance(start,target)))
-                        path=game:GetService("PathfindingService"):CreatePath({
-                            AgentRadius=2, AgentHeight=5, AgentCanJump=true, WaypointSpacing=12,
-                        })
-                        local computed,detail=pcall(function() path:ComputeAsync(start,goal) end)
-                        if not active() then break end
-                        if computed and path.Status==Enum.PathStatus.Success then
-                            local points=path:GetWaypoints()
-                            if #points>0 then waypoints,selectedGoal,finalLeg=points,goal,isFinal end
-                            if not waypoints then failure="ROTA VAZIA" end
-                        else
-                            failure=computed and ("SEM ROTA: "..tostring(path.Status))
-                                or ("ERRO AO CALCULAR TRECHO DE "..math.floor((start-goal).Magnitude).." STUDS: "..tostring(detail))
-                        end
-                        path:Destroy();path=nil
-                        if waypoints then break end
-                    else failure="Personagem deslocado antes do calculo; destino do trecho ficou distante." end
-                end
-                if waypoints then break end
+            local route
+            -- Usa o trecho pronto apenas se ainda estivermos na entrada prevista.
+            if prepared and prepared.done and prepared.route and reached(prepared.start,5) then
+                route=prepared.route
             end
-            if not active() or not waypoints then break end
+            planId=planId+1
+            prepared=nil
+            if not route then
+                collectionMessage(string.format("Calculando trecho %d | faltam %.0f studs",
+                    segment,flatDistance(root.Position,target)))
+                local why
+                route,why=calculateRoute(root.Position,active)
+                if why then failure=why end
+            end
+            if not active() or not route then break end
+            local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
+            if not finalLeg then
+                local id=planId
+                local job={start=selectedGoal,done=false}
+                prepared=job
+                -- Calcula em paralelo com a caminhada, sem emitir comandos de movimento.
+                task.spawn(function()
+                    local function valid()
+                        return active() and not collector.finished and id==planId
+                    end
+                    local ok,result=pcall(calculateRoute,job.start,valid)
+                    if valid() then
+                        job.route=ok and result or nil
+                        job.done=true
+                    end
+                end)
+            end
             for index,point in ipairs(waypoints) do
                 if not active() or os.clock()>=deadline then break end
                 if reached(selectedGoal,3) then break end
@@ -2136,6 +2169,7 @@ local function runCollection(uid, model, rec)
                 if segment==160 then failure="Limite de 160 trechos atingido." end
             end
         end
+        planId=planId+1
         if active() then
             if not arrived and os.clock()>=deadline then failure="TEMPO TOTAL ESGOTADO | "..failure end
             collectionMessage(arrived
