@@ -2091,6 +2091,7 @@ do
     end
 end
 stopCollection = function()
+    if collector.returnMotionCleanup then collector.returnMotionCleanup();collector.returnMotionCleanup=nil end
     if collector.restoreSpeed then collector.restoreSpeed() end
     if collector.cleanup then collector.cleanup() end
     collector.enabled = false
@@ -2558,6 +2559,46 @@ local function runCollection(uid, model, rec)
             lastReturnPosition=current
             return returnCrossed
         end
+        local returnMoveGoal=nil
+        local returnDirection=Vector3.zero
+        local previousReturnFrame=root.Position
+        local motionBinding="DiceRadarReturn_"..tostring(generation)
+        local motionBound=false
+        local function cleanupReturnMotion()
+            if not motionBound then return end
+            motionBound=false
+            game:GetService("RunService"):UnbindFromRenderStep(motionBinding)
+            if humanoid.Parent then humanoid:Move(Vector3.zero,false) end
+        end
+        local function moveToward(point)
+            if returning then returnMoveGoal=point
+            else humanoid:MoveTo(point) end
+        end
+        if returning then
+            motionBound=true
+            collector.returnMotionCleanup=cleanupReturnMotion
+            diagnostics.returnControl="continuous_Humanoid_Move"
+            game:GetService("RunService"):BindToRenderStep(motionBinding,Enum.RenderPriority.Character.Value+1,function()
+                if not active() or returnCrossed then
+                    humanoid:Move(Vector3.zero,false);return
+                end
+                local current=root.Position
+                if returnMoveGoal then
+                    local delta=Vector3.new(current.X-previousReturnFrame.X,0,current.Z-previousReturnFrame.Z)
+                    local offset=Vector3.new(returnMoveGoal.X-previousReturnFrame.X,0,returnMoveGoal.Z-previousReturnFrame.Z)
+                    local lengthSquared=delta:Dot(delta)
+                    local t=lengthSquared>0 and offset:Dot(delta)/lengthSquared or -1
+                    local crossed=t>=0 and t<=1 and (offset-delta*t).Magnitude<=3
+                    local direction=Vector3.new(returnMoveGoal.X-current.X,0,returnMoveGoal.Z-current.Z)
+                    if crossed or direction.Magnitude<=3 then
+                        -- Mantem a direcao enquanto o laço entrega o proximo waypoint.
+                        returnMoveGoal=nil
+                    elseif direction.Magnitude>0 then returnDirection=direction.Unit end
+                end
+                humanoid:Move(returnDirection,false)
+                previousReturnFrame=current
+            end)
+        end
         diagnostics.phase=returning and "volta" or "ida"
         recordDiagnostic("inicio",{target={target.X,target.Y,target.Z},walkSpeed=humanoid.WalkSpeed})
         if returning then
@@ -2909,7 +2950,7 @@ local function runCollection(uid, model, rec)
                     if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
                     collectionMessage(string.format((returning and "Voltando" or "Indo")..": trecho %d | ponto %d/%d | faltam %.0f studs",
                         segment,index,#waypoints,flatDistance(root.Position,target)))
-                    humanoid:MoveTo(point.Position)
+                    moveToward(point.Position)
                     if returning then
                         local velocity=root.AssemblyLinearVelocity
                         local offset=point.Position-root.Position
@@ -2932,7 +2973,7 @@ local function runCollection(uid, model, rec)
                         if updateReturnCrossing() then segmentReached=true;break end
                         approachSpeed()
                         if reached(selectedGoal,goalRadius) then segmentReached=true;break end
-                        if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+0.2 end
+                        if os.clock()>=nextMove then moveToward(point.Position);nextMove=os.clock()+0.2 end
                         heartbeat:Wait()
                         local currentPosition=root.Position
                         if flatDistance(currentPosition,progressPosition)>=1 then
@@ -3013,6 +3054,8 @@ local function runCollection(uid, model, rec)
                 end
             end
         end
+        cleanupReturnMotion()
+        if returning then collector.returnMotionCleanup=nil end
         restoreSpeed()
         collector.restoreSpeed=nil
         if diagnosticConnection then diagnosticConnection:Disconnect();diagnosticConnection=nil end
@@ -3427,6 +3470,7 @@ local function runCollection(uid, model, rec)
         local reportOK,reportError=pcall(collector.renderDiagnostics,diagnostics)
         if not reportOK then warn("[Dice Radar] Falha no painel de diagnostico: "..tostring(reportError)) end
     end
+    if collector.returnMotionCleanup then collector.returnMotionCleanup();collector.returnMotionCleanup=nil end
     if collector.restoreSpeed then collector.restoreSpeed();collector.restoreSpeed=nil end
     shownConnection:Disconnect()
     hiddenConnection:Disconnect()
