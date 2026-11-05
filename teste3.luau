@@ -1934,6 +1934,7 @@ local function collectionMessage(message)
     if alive then collectionStatus.Text = message end
 end
 stopCollection = function()
+    if collector.restoreSpeed then collector.restoreSpeed() end
     if collector.cleanup then collector.cleanup() end
     collector.enabled = false
     collector.pending = false
@@ -2024,6 +2025,22 @@ local function runCollection(uid, model, rec)
             return flatDistance(root.Position,point)<=radius
                 and math.abs(root.Position.Y-point.Y)<=verticalTolerance
         end
+        local originalSpeed=nil
+        local function restoreSpeed()
+            if originalSpeed and humanoid.Parent and humanoid.WalkSpeed==24 then
+                humanoid.WalkSpeed=originalSpeed
+            end
+            originalSpeed=nil
+        end
+        collector.restoreSpeed=restoreSpeed
+        local function approachSpeed()
+            local speed=humanoid.WalkSpeed
+            if not originalSpeed and speed>24
+                and flatDistance(root.Position,target)<=math.max(18,speed*0.2) then
+                originalSpeed=speed
+                humanoid.WalkSpeed=24
+            end
+        end
         local params=RaycastParams.new()
         params.FilterType=Enum.RaycastFilterType.Exclude
         local excluded={character}
@@ -2068,6 +2085,26 @@ local function runCollection(uid, model, rec)
             return goals,finalLeg
         end
         local heartbeat=game:GetService("RunService").Heartbeat
+        local function settleAt(point,radius)
+            collectionMessage("Freando e estabilizando perto do destino...")
+            local untilTime=os.clock()+1.2
+            local stableSince=nil
+            while active() and os.clock()<untilTime do
+                approachSpeed()
+                humanoid:MoveTo(root.Position)
+                humanoid:Move(Vector3.new(0,0,0),false)
+                heartbeat:Wait()
+                local velocity=root.AssemblyLinearVelocity
+                local stopped=Vector3.new(velocity.X,0,velocity.Z).Magnitude<2
+                if reached(point,radius) and stopped then
+                    stableSince=stableSince or os.clock()
+                    if os.clock()-stableSince>=0.2 then return true end
+                else
+                    stableSince=nil
+                end
+            end
+            return false
+        end
         -- Remove apenas pontos praticamente colineares; preserva curvas e saltos.
         local function simplifyRoute(points)
             if #points<3 then return points end
@@ -2138,7 +2175,10 @@ local function runCollection(uid, model, rec)
         end
         for segment=1,160 do
             if not active() or os.clock()>=deadline then break end
-            if reached(target,arrivalRadius) then arrived=true;break end
+            approachSpeed()
+            if reached(target,arrivalRadius) and settleAt(target,arrivalRadius) then
+                arrived=true;break
+            end
             local segmentStart=root.Position
             local route
             -- Usa o trecho pronto apenas se ainda estivermos na entrada prevista.
@@ -2196,6 +2236,7 @@ local function runCollection(uid, model, rec)
                             incoming.Magnitude*0.25,outgoing.Magnitude*0.25)
                     end
                 end
+                approachSpeed()
                 if not reached(point.Position,reachRadius) then
                     if point.Action==Enum.PathWaypointAction.Jump then humanoid.Jump=true end
                     collectionMessage(string.format((returning and "Voltando" or "Indo")..": trecho %d | ponto %d/%d | faltam %.0f studs",
@@ -2207,6 +2248,7 @@ local function runCollection(uid, model, rec)
                     local previousPosition=root.Position
                     local passed=false
                     while active() and os.clock()<timeout and not passed and not reached(point.Position,reachRadius) do
+                        approachSpeed()
                         if reached(selectedGoal,3) then segmentReached=true;break end
                         if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+0.2 end
                         heartbeat:Wait()
@@ -2235,9 +2277,11 @@ local function runCollection(uid, model, rec)
             if active() then
                 if finalLeg and (segmentReached or reached(selectedGoal,3))
                     or reached(target,arrivalRadius) then
-                    -- Interrompe o comando antigo no frame da chegada.
-                    humanoid:MoveTo(root.Position)
-                    arrived=true;break
+                    local stopPoint=finalLeg and selectedGoal or target
+                    local stopRadius=finalLeg and 4 or arrivalRadius
+                    if settleAt(stopPoint,stopRadius) then arrived=true;break end
+                    failure="Drift afastou do destino; corrigindo aproximacao"
+                    -- Recalcula a aproximacao se deslizou; nao inicia coleta nem volta ainda.
                 end
                 if flatDistance(root.Position,segmentStart)<2 then stagnant=stagnant+1 else stagnant=0 end
                 if stagnant>=3 then failure="SEM PROGRESSO apos 3 tentativas | "..failure;break end
@@ -2246,6 +2290,8 @@ local function runCollection(uid, model, rec)
         end
         planId=planId+1
         if not arrived and os.clock()>=deadline then failure="TEMPO TOTAL ESGOTADO | "..failure end
+        restoreSpeed()
+        collector.restoreSpeed=nil
         return arrived, failure
         end -- walkTo: planejamento independente por perna da viagem
 
@@ -2348,6 +2394,7 @@ local function runCollection(uid, model, rec)
                 or " Retorno interrompido: "..tostring(returnWhy)))
         end
     end)
+    if collector.restoreSpeed then collector.restoreSpeed();collector.restoreSpeed=nil end
     shownConnection:Disconnect()
     hiddenConnection:Disconnect()
     if collector.cleanup then collector.cleanup();collector.cleanup=nil end
