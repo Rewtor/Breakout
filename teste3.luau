@@ -2041,6 +2041,103 @@ local function startCollection(automatic)
     collectionMessage(automatic and "Automatico ligado: aguardando os valores dos ovos..."
         or "Ida e volta: aguardando os ovos carregarem...")
 end
+do
+    local monitor=nil
+    local heartbeatConnection=nil
+    local carryConnection=nil
+    local function stopMonitor()
+        if heartbeatConnection then heartbeatConnection:Disconnect();heartbeatConnection=nil end
+        if carryConnection then carryConnection:Disconnect();carryConnection=nil end
+        if monitor then monitor.running=false end
+    end
+    local function snapshot(value,depth,seen)
+        local kind=typeof(value)
+        if kind=="Instance" then return {type=kind,path=value:GetFullName(),class=value.ClassName} end
+        if type(value)=="string" then return value:sub(1,300) end
+        if type(value)=="number" then return finite(value) or tostring(value) end
+        if type(value)=="boolean" then return value end
+        if value==nil then return {type="nil"} end
+        if type(value)~="table" then return {type=kind,value=tostring(value)} end
+        if seen[value] or depth<=0 then return {type="table",limited=true} end
+        seen[value]=true
+        local entries={}
+        local count=0
+        for key,item in pairs(value) do
+            count=count+1
+            if count<=40 then entries[#entries+1]={key=tostring(key),value=snapshot(item,depth-1,seen)} end
+        end
+        table.sort(entries,function(a,b) return a.key<b.key end)
+        seen[value]=nil
+        return {type="table",entries=entries,count=count,truncated=count>40}
+    end
+    local function append(kind,data)
+        if not monitor then return end
+        if #monitor.events>=100 then monitor.truncated=true;return end
+        monitor.events[#monitor.events+1]={time=os.clock()-monitor.startedAt,kind=kind,data=data}
+    end
+    local function readCarry()
+        local state=modules.EggState
+        if not state or type(state.ReadCarryState)~="function" then
+            return {error="ReadCarryState indisponivel"}
+        end
+        local result=table.pack(pcall(state.ReadCarryState))
+        if not result[1] then return {error=tostring(result[2])} end
+        local values={}
+        for index=2,result.n do values[#values+1]=snapshot(result[index],4,{}) end
+        return {returns=values,count=result.n-1}
+    end
+    addButton("INICIAR diagnostico de ovo carregado (120s)",function()
+        stopMonitor()
+        monitor={kind="carry_state_observation",version=1,running=true,
+            startedAt=os.clock(),events={},note="Somente leitura; nenhuma coleta ou entrega foi acionada."}
+        collector.lastCarryDiagnostics=monitor
+        local initial=readCarry()
+        append("estado_inicial",initial)
+        local lastEncoded=Http:JSONEncode(initial)
+        local state=modules.EggState
+        local connected,connection=pcall(function()
+            if not state or not state.CarryChanged then return nil end
+            return state.CarryChanged:Connect(function(...)
+                local args=table.pack(...)
+                local values={}
+                for index=1,math.min(args.n,10) do values[#values+1]=snapshot(args[index],4,{}) end
+                append("CarryChanged",{arguments=values,count=args.n})
+                append("estado_apos_evento",readCarry())
+            end)
+        end)
+        if connected then carryConnection=connection end
+        monitor.eventConnected=connected and connection~=nil
+        if not connected then append("erro_conexao",{message=tostring(connection)}) end
+        local elapsed=0
+        heartbeatConnection=game:GetService("RunService").Heartbeat:Connect(function(dt)
+            if not alive then stopMonitor();return end
+            if os.clock()-monitor.startedAt>=120 then
+                append("fim_tempo",readCarry());stopMonitor()
+                collectionMessage("Diagnostico de carregamento encerrado. Copie o relatorio.");return
+            end
+            elapsed=elapsed+dt
+            if elapsed<0.5 then return end
+            elapsed=0
+            local current=readCarry()
+            local encoded=Http:JSONEncode(current)
+            if encoded~=lastEncoded then
+                lastEncoded=encoded
+                append("mudanca_estado",current)
+            end
+        end)
+        collectionMessage("Observando por 120s. Pegue um ovo manualmente e entregue; depois copie o diagnostico.")
+    end)
+    addButton("PARAR e copiar diagnostico de ovo carregado",function()
+        if not monitor then collectionMessage("Inicie primeiro o diagnostico de ovo carregado.");return end
+        if monitor.running then append("estado_final",readCarry()) end
+        stopMonitor()
+        local encoded=Http:JSONEncode(monitor)
+        local saved=writefile and pcall(function() writefile("DiceRadar_Carregamento.json",encoded) end)
+        local copied=setclipboard and pcall(function() setclipboard(encoded) end)
+        collectionMessage(copied and "Diagnostico de carregamento copiado. Cole no chat."
+            or (saved and "Salvo em DiceRadar_Carregamento.json." or "Sem clipboard/arquivo; relatorio mantido nesta execucao."))
+    end)
+end
 addButton("Copiar diagnostico dos modulos de ovos/prompts",function()
     if collectorBusy then
         collectionMessage("Aguarde terminar a viagem para investigar os modulos.");return
