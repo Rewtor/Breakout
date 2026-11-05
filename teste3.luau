@@ -2042,6 +2042,10 @@ do
             lines[#lines+1]="Personagem: "..pos(target.character)
             lines[#lines+1]=string.format("Registro atual: %s | candidatos aceitos: %d | prompts examinados: %d",
                 tostring(target.hasCurrentRecord),data.promptAccepted or 0,data.promptExamined or 0)
+            if data.preparation then
+                lines[#lines+1]="Preparacao: modelo "..tostring(data.preparation.modelAvailable)
+                    .." | ancora "..tostring(data.preparation.anchorReady)
+            end
             if data.anchor then
                 lines[#lines+1]="Prompt por ancora previa: "..tostring(data.anchor.uid).." (experimental)"
             end
@@ -2532,7 +2536,7 @@ local function runCollection(uid, model, rec)
             visibleMessages=current
         end)
         local returnSeed=nil
-        local function walkTo(target, returning)
+        local function walkTo(target, returning, targetProvider)
         -- Conserva a passagem pelo destino mesmo entre dois trechos/ComputeAsync.
         local returnCrossed=false
         local lastReturnPosition=root.Position
@@ -2815,6 +2819,14 @@ local function runCollection(uid, model, rec)
         for segment=1,160 do
             if not active() or os.clock()>=deadline then break end
             if updateReturnCrossing() then arrived=true;break end
+            if targetProvider then
+                local latest=targetProvider()
+                if not latest then failure="Alvo removido durante a ida";break end
+                if (latest-target).Magnitude>0.1 then
+                    recordDiagnostic("destino_atualizado",{previous={target.X,target.Y,target.Z},current={latest.X,latest.Y,latest.Z}})
+                    target=latest;prepared=nil;planId=planId+1
+                end
+            end
             approachSpeed()
             if not returning and reached(target,4) then
                 arrived,failure=centerOnEgg()
@@ -2850,6 +2862,7 @@ local function runCollection(uid, model, rec)
             local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
             local goalRadius=finalLeg and (returning and arrivalRadius or 2.5) or 3
             local segmentReached=false
+            local targetMoved=false
             if not finalLeg then
                 local id=planId
                 local job={start=selectedGoal,done=false}
@@ -2912,6 +2925,8 @@ local function runCollection(uid, model, rec)
                     local nextMove=os.clock()+0.2
                     local startPosition=root.Position
                     local previousPosition=root.Position
+                    local progressPosition=root.Position
+                    local progressTime=os.clock()
                     local passed=false
                     while active() and os.clock()<timeout and not passed and not reached(point.Position,reachRadius) do
                         if updateReturnCrossing() then segmentReached=true;break end
@@ -2920,6 +2935,22 @@ local function runCollection(uid, model, rec)
                         if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+0.2 end
                         heartbeat:Wait()
                         local currentPosition=root.Position
+                        if flatDistance(currentPosition,progressPosition)>=1 then
+                            progressPosition=currentPosition;progressTime=os.clock()
+                        elseif os.clock()-progressTime>=0.75 then
+                            prepared=nil;planId=planId+1
+                            recordDiagnostic("recalculo_sem_progresso",{duration=os.clock()-progressTime,
+                                position={currentPosition.X,currentPosition.Y,currentPosition.Z}})
+                            break
+                        end
+                        if targetProvider then
+                            local latest=targetProvider()
+                            if not latest or (latest-target).Magnitude>0.1 then
+                                targetMoved=true;prepared=nil;planId=planId+1
+                                recordDiagnostic("alvo_mudou_durante_trecho",{})
+                                break
+                            end
+                        end
                         -- Inclui o ultimo ponto: antes ele podia ser ultrapassado e
                         -- receber MoveTo para tras a cada renovacao do comando.
                         if point.Action~=Enum.PathWaypointAction.Jump then
@@ -2930,6 +2961,7 @@ local function runCollection(uid, model, rec)
                         end
                         previousPosition=currentPosition
                     end
+                    if targetMoved then break end
                     if not active() or segmentReached or reached(selectedGoal,goalRadius) then
                         if active() and reached(selectedGoal,goalRadius) then segmentReached=true end
                         break
@@ -2941,7 +2973,7 @@ local function runCollection(uid, model, rec)
                     end
                 end
             end
-            if active() then
+            if active() and not targetMoved then
                 if updateReturnCrossing() then arrived=true;break end
                 if not returning and finalLeg and reached(target,4) then
                     arrived,failure=centerOnEgg()
@@ -3191,7 +3223,59 @@ local function runCollection(uid, model, rec)
         -- A rota de preparacao nao e uma rota de retorno do ovo.
         returnSeed=nil
         recordDiagnostic("default_alcancado",{position={root.Position.X,root.Position.Y,root.Position.Z}})
-        local arrived,why=walkTo(eggTarget,false)
+        local lastTargetRefresh=0
+        local function refreshTarget(force)
+            if not force and os.clock()-lastTargetRefresh<0.25 then return eggTarget end
+            lastTargetRefresh=os.clock()
+            local currentModels,currentRecords=collectSources()
+            promptAnchors.models=currentModels;promptAnchors.records=currentRecords
+            model=currentModels[tostring(uid)]
+            local current=currentRecords[tostring(uid)]
+            if not current or current.State=="Claimed" then eggTarget=nil;return nil end
+            rec=current
+            eggTarget=collectionDestination(model,rec)
+            return eggTarget
+        end
+        local function stagingTarget()
+            local destination=refreshTarget()
+            if not destination then return nil end
+            local direction=Vector3.new(destination.X-origin.X,0,destination.Z-origin.Z)
+            if direction.Magnitude<1 then return destination end
+            return destination-direction.Unit*math.min(80,direction.Magnitude/2)
+        end
+        local currentDestination=refreshTarget(true)
+        local arrived,why=false,"Alvo indisponivel antes da aproximacao"
+        if currentDestination then
+            collectionMessage("Indo ao ponto de preparacao, antes do ovo...")
+            local staged,stageWhy=walkTo(stagingTarget(),false,stagingTarget)
+            returnSeed=nil
+            if staged and active() then
+                humanoid:MoveTo(root.Position)
+                collectionMessage("Aguardando modelo e ancora do ovo a distancia...")
+                local anchorDeadline=os.clock()+8
+                local ready=false
+                repeat
+                    local destination=refreshTarget(true)
+                    if not destination then break end
+                    promptAnchors.sample()
+                    local count=0
+                    for prompt,binding in pairs(promptAnchors.bindings) do
+                        if prompt.Parent and binding.uid==tostring(uid)
+                            and promptAnchors.valid(binding,promptAnchors.records,promptAnchors.models) then count=count+1 end
+                    end
+                    ready=count==1
+                    if ready then break end
+                    task.wait(0.25)
+                until not active() or os.clock()>=anchorDeadline
+                diagnostics.preparation={modelAvailable=model~=nil,anchorReady=ready}
+                recordDiagnostic("preparacao_ancora",diagnostics.preparation)
+                if ready and active() then
+                    local finalTarget=refreshTarget(true)
+                    if finalTarget then arrived,why=walkTo(finalTarget,false,refreshTarget)
+                    else why="Alvo removido apos preparar a ancora" end
+                else why="Modelo/ancora nao confirmados no ponto de preparacao" end
+            else why=stageWhy end
+        end
         if not active() then return end
         local outcome="Ida interrompida: "..tostring(why)
         if arrived then
