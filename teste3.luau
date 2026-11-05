@@ -1,7 +1,7 @@
 -- =========================================================
 -- DICE RADAR V18 LITE | HOP POR PAGINA
 -- Painel mobile + ranking + webhook + server hop
--- Teste de caminhada: somente ida ao ovo, sem coleta nem retorno.
+-- Ida, coleta e retorno; destino da ida fixado na coordenada do ovo.
 -- =========================================================
 
 local Players = game:GetService("Players")
@@ -2015,7 +2015,8 @@ local function runCollection(uid, model, rec)
         if not eggTarget then error("ovo sem posicao", 0) end
         local returnSeed=nil
         local function walkTo(target, returning)
-        local arrivalRadius = returning and 3 or 5
+        -- X/Z do ovo; Y da raiz permanece na altura fisica do personagem.
+        local arrivalRadius = returning and 3 or 0.75
         local function flatDistance(a,b)
             local d=a-b
             return Vector3.new(d.X,0,d.Z).Magnitude
@@ -2026,20 +2027,33 @@ local function runCollection(uid, model, rec)
             return flatDistance(root.Position,point)<=radius
                 and math.abs(root.Position.Y-point.Y)<=verticalTolerance
         end
-        local originalSpeed=nil
+        local normalSpeed=humanoid.WalkSpeed
+        local appliedSpeed=nil
         local function restoreSpeed()
-            if originalSpeed and humanoid.Parent and humanoid.WalkSpeed==24 then
-                humanoid.WalkSpeed=originalSpeed
+            if appliedSpeed and humanoid.Parent and humanoid.WalkSpeed==appliedSpeed then
+                humanoid.WalkSpeed=normalSpeed
             end
-            originalSpeed=nil
+            appliedSpeed=nil
         end
         collector.restoreSpeed=restoreSpeed
         local function approachSpeed()
-            local speed=humanoid.WalkSpeed
-            if not originalSpeed and speed>24
-                and flatDistance(root.Position,target)<=math.max(18,speed*0.2) then
-                originalSpeed=speed
-                humanoid.WalkSpeed=24
+            if appliedSpeed and humanoid.WalkSpeed~=appliedSpeed then
+                normalSpeed=humanoid.WalkSpeed
+                appliedSpeed=nil
+            elseif not appliedSpeed then
+                normalSpeed=humanoid.WalkSpeed
+            end
+            local velocity=root.AssemblyLinearVelocity
+            local actual=Vector3.new(velocity.X,0,velocity.Z).Magnitude
+            local distance=flatDistance(root.Position,target)
+            local brakeDistance=math.max(30,math.max(normalSpeed,actual)*0.45+20)
+            if distance<brakeDistance and normalSpeed>12 then
+                local minimum=returning and 12 or 2
+                local limit=math.min(normalSpeed,math.max(minimum,math.sqrt(160*math.max(distance-arrivalRadius,0))))
+                humanoid.WalkSpeed=limit
+                appliedSpeed=limit
+            else
+                restoreSpeed()
             end
         end
         local params=RaycastParams.new()
@@ -2061,15 +2075,8 @@ local function runCollection(uid, model, rec)
                     goals[#goals+1]=hit.Position
                 end
             end
-            if finalLeg and returning then
+            if finalLeg then
                 addGround(target)
-            elseif finalLeg then
-                for _,radius in ipairs({3,5}) do
-                    for i=0,7 do
-                        local angle=i*math.pi/4
-                        addGround(target+Vector3.new(math.cos(angle)*radius,0,math.sin(angle)*radius))
-                    end
-                end
             else
                 local delta=Vector3.new(target.X-here.X,0,target.Z-here.Z).Unit
                 for _,degrees in ipairs({0,30,-30,60,-60}) do
@@ -2203,6 +2210,7 @@ local function runCollection(uid, model, rec)
             if not active() or not route then break end
             lastRoute=route
             local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
+            local goalRadius=finalLeg and arrivalRadius or 3
             local segmentReached=false
             if not finalLeg then
                 local id=planId
@@ -2228,9 +2236,10 @@ local function runCollection(uid, model, rec)
             for index=(#waypoints>1) and 2 or 1,#waypoints do
                 local point=waypoints[index]
                 if not active() or os.clock()>=deadline then break end
-                if reached(selectedGoal,3) then segmentReached=true;break end
+                if reached(selectedGoal,goalRadius) then segmentReached=true;break end
                 -- Antecipa o proximo destino em retas; conserva precisao nas curvas/pulos.
                 local reachRadius=2.5
+                if finalLeg and index==#waypoints then reachRadius=arrivalRadius end
                 local nextPoint=waypoints[index+1]
                 local previousPoint=waypoints[index-1]
                 if nextPoint and previousPoint and point.Action~=Enum.PathWaypointAction.Jump
@@ -2256,7 +2265,7 @@ local function runCollection(uid, model, rec)
                     local passed=false
                     while active() and os.clock()<timeout and not passed and not reached(point.Position,reachRadius) do
                         approachSpeed()
-                        if reached(selectedGoal,3) then segmentReached=true;break end
+                        if reached(selectedGoal,goalRadius) then segmentReached=true;break end
                         if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+0.2 end
                         heartbeat:Wait()
                         local currentPosition=root.Position
@@ -2270,8 +2279,8 @@ local function runCollection(uid, model, rec)
                         end
                         previousPosition=currentPosition
                     end
-                    if not active() or segmentReached or reached(selectedGoal,3) then
-                        if active() and reached(selectedGoal,3) then segmentReached=true end
+                    if not active() or segmentReached or reached(selectedGoal,goalRadius) then
+                        if active() and reached(selectedGoal,goalRadius) then segmentReached=true end
                         break
                     end
                     if not passed and not reached(point.Position,reachRadius) then
@@ -2282,10 +2291,10 @@ local function runCollection(uid, model, rec)
                 end
             end
             if active() then
-                if finalLeg and (segmentReached or reached(selectedGoal,3))
+                if finalLeg and (segmentReached or reached(selectedGoal,goalRadius))
                     or reached(target,arrivalRadius) then
-                    local stopPoint=finalLeg and selectedGoal or target
-                    local stopRadius=finalLeg and 4 or arrivalRadius
+                    local stopPoint=target
+                    local stopRadius=arrivalRadius
                     if settleAt(stopPoint,stopRadius) then arrived=true;break end
                     failure="Drift afastou do destino; corrigindo aproximacao"
                     -- Recalcula a aproximacao se deslizou; nao inicia coleta nem volta ainda.
