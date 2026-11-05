@@ -1971,6 +1971,14 @@ do
             lines[#lines+1]="Personagem: "..pos(target.character)
             lines[#lines+1]=string.format("Registro atual: %s | candidatos aceitos: %d | prompts examinados: %d",
                 tostring(target.hasCurrentRecord),data.promptAccepted or 0,data.promptExamined or 0)
+            if data.interaction then
+                local interaction=data.interaction
+                lines[#lines+1]=string.format("Interacao: visivel antes %s | apos AlwaysShow %s | hold iniciado %s | Triggered %s",
+                    tostring(interaction.shownBefore),tostring(interaction.shownAfter),
+                    tostring(interaction.holdStarted),tostring(interaction.triggered))
+                lines[#lines+1]="Exclusivity original: "..interaction.originalExclusivity
+                if interaction.error then lines[#lines+1]="Falha: "..interaction.error end
+            end
             for index,item in ipairs(data.promptCandidates or {}) do
                 lines[#lines+1]=string.format("\n%d. %s | %s",index,item.name,item.verdict)
                 lines[#lines+1]=item.path
@@ -2759,8 +2767,13 @@ local function runCollection(uid, model, rec)
                 local _,association=belongsToSelectedEgg(prompt)
                 recordDiagnostic("prompt_selecionado",{uid=tostring(uid),path=prompt:GetFullName(),association=association})
                 local triggered=false
+                local originalExclusivity=prompt.Exclusivity
+                local interaction={path=prompt:GetFullName(),association=association,
+                    shownBefore=shown[prompt]==true,originalExclusivity=tostring(originalExclusivity),
+                    holdStarted=false,triggered=false}
+                diagnostics.interaction=interaction
                 local connection=prompt.Triggered:Connect(function(who)
-                    if who==player then triggered=true end
+                    if who==player then triggered=true;interaction.triggered=true end
                 end)
                 collector.prompt=prompt
                 local originalHold=prompt.HoldDuration
@@ -2770,15 +2783,38 @@ local function runCollection(uid, model, rec)
                     cleaned=true
                     pcall(function() prompt:InputHoldEnd() end)
                     pcall(function() prompt.HoldDuration=originalHold end)
+                    pcall(function()
+                        if prompt.Exclusivity==Enum.ProximityPromptExclusivity.AlwaysShow then
+                            prompt.Exclusivity=originalExclusivity
+                        end
+                    end)
                     connection:Disconnect()
                 end
                 collector.cleanup=cleanupInteraction
                 local interactionOK,interactionError=pcall(function()
                     local belongs,reason=belongsToSelectedEgg(prompt)
                     if not belongs then error("Prompt perdeu vinculo com o alvo: "..reason,0) end
+                    collectionMessage("Preparando exibicao do prompt selecionado | UID "..tostring(uid))
+                    prompt.Exclusivity=Enum.ProximityPromptExclusivity.AlwaysShow
+                    local showDeadline=os.clock()+0.75
+                    while active() and prompt.Parent and prompt.Enabled and not shown[prompt]
+                        and os.clock()<showDeadline do
+                        game:GetService("RunService").Heartbeat:Wait()
+                    end
+                    interaction.shownAfter=shown[prompt]==true
+                    recordDiagnostic("exibicao_prompt",{before=interaction.shownBefore,after=interaction.shownAfter})
+                    if not active() then return end
+                    if not interaction.shownAfter then error("Prompt selecionado continua oculto; interacao bloqueada",0) end
+                    belongs,reason=belongsToSelectedEgg(prompt)
+                    if not belongs then error("Prompt perdeu vinculo antes do hold: "..reason,0) end
+                    local position=promptPosition(prompt)
+                    if not position or not prompt.Enabled or (root.Position-position).Magnitude>prompt.MaxActivationDistance then
+                        error("Prompt indisponivel ou fora do alcance antes do hold",0)
+                    end
                     collectionMessage("Interagindo com UID "..tostring(uid).." | "..prompt.Name)
                     if prompt.Name=="CarryAreaEgg" then prompt.HoldDuration=0 end
                     prompt:InputHoldBegin()
+                    interaction.holdStarted=true
                     local holdUntil=os.clock()+prompt.HoldDuration
                     -- Mesmo com duracao zero, deixa o motor processar um frame.
                     game:GetService("RunService").Heartbeat:Wait()
@@ -2795,6 +2831,7 @@ local function runCollection(uid, model, rec)
                         game:GetService("RunService").Heartbeat:Wait()
                     end
                 end)
+                if not interactionOK then interaction.error=tostring(interactionError) end
                 cleanupInteraction()
                 collector.cleanup=nil
                 collector.prompt=nil
