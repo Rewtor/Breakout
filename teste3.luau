@@ -1476,7 +1476,8 @@ local function availabilityFor(model, state)
 
     local now = os.clock()
     if not prompt and now >= (state.nextPromptTry or 0) then
-        prompt = model:FindFirstChild("StealPrompt", true)
+        prompt = model:FindFirstChild("CarryAreaEgg", true)
+            or model:FindFirstChild("StealPrompt", true)
         if prompt and not prompt:IsA("ProximityPrompt") then prompt = nil end
         state.nextPromptTry = now + 5
     end
@@ -2197,7 +2198,8 @@ local function runCollection(uid, model, rec)
                 if not position or (root.Position-position).Magnitude>prompt.MaxActivationDistance then return end
                 local belongs=model and model.Parent and prompt:IsDescendantOf(model)
                 -- Prompts fora do modelo so sao aceitos se visiveis, de roubo e perto do alvo.
-                if not belongs and not (shown[prompt] and prompt.Name=="StealPrompt"
+                local eggPrompt=prompt.Name=="CarryAreaEgg" or prompt.Name=="StealPrompt"
+                if not belongs and not (shown[prompt] and eggPrompt
                     and (position-eggTarget).Magnitude<=10) then return end
                 if prompt.RequiresLineOfSight then
                     local rayParams=RaycastParams.new()
@@ -2240,8 +2242,19 @@ local function runCollection(uid, model, rec)
                     if who==player then triggered=true end
                 end)
                 collector.prompt=prompt
+                local originalHold=prompt.HoldDuration
+                local cleaned=false
+                local function cleanupInteraction()
+                    if cleaned then return end
+                    cleaned=true
+                    pcall(function() prompt:InputHoldEnd() end)
+                    pcall(function() prompt.HoldDuration=originalHold end)
+                    connection:Disconnect()
+                end
+                collector.cleanup=cleanupInteraction
                 local interactionOK,interactionError=pcall(function()
-                    collectionMessage("Interagindo com o ovo...")
+                    collectionMessage("Interagindo: "..prompt.Name.."...")
+                    if prompt.Name=="CarryAreaEgg" then prompt.HoldDuration=0 end
                     prompt:InputHoldBegin()
                     local holdUntil=os.clock()+prompt.HoldDuration+0.15
                     while active() and prompt.Parent and prompt.Enabled and os.clock()<holdUntil do
@@ -2251,9 +2264,9 @@ local function runCollection(uid, model, rec)
                     local waitUntil=os.clock()+2
                     while active() and not triggered and os.clock()<waitUntil do task.wait(0.05) end
                 end)
-                pcall(function() prompt:InputHoldEnd() end)
+                cleanupInteraction()
+                collector.cleanup=nil
                 collector.prompt=nil
-                connection:Disconnect()
                 outcome=interactionOK and (triggered
                     and "Interacao acionada; posse do ovo nao confirmada."
                     or "Interacao sem confirmacao; verifique a coleta.")
@@ -2270,6 +2283,7 @@ local function runCollection(uid, model, rec)
     end)
     shownConnection:Disconnect()
     hiddenConnection:Disconnect()
+    if collector.cleanup then collector.cleanup();collector.cleanup=nil end
     if collector.prompt then
         pcall(function() collector.prompt:InputHoldEnd() end)
         collector.prompt=nil
