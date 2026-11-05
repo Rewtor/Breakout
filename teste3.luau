@@ -26,6 +26,7 @@ local requestFn =
 local SCAN_INTERVAL = 1.5
 local GEOMETRY_TTL = 60
 local CONFIG_FILE = "DiceRadar_Config.json"
+local DEFAULT_POSITION = Vector3.new(519.82, 71.85, -364.44)
 
 local function finite(value)
     local n = tonumber(value)
@@ -48,7 +49,6 @@ local cfg = {
     AH = false,
     AHT = 60,
     PC = 1,
-    DefaultPoint = false,
 }
 
 if isfile and readfile then
@@ -2020,31 +2020,6 @@ stopCollection = function()
     -- Busy so e liberado quando o worker antigo terminar.
     collectionMessage("Coleta desligada. Viagem cancelada.")
 end
-local function defaultPosition()
-    local point=cfg.DefaultPoint
-    if type(point)~="table" or point.placeId~=game.PlaceId then return nil end
-    local x,y,z=finite(point.x),finite(point.y),finite(point.z)
-    if not x or not y or not z then return nil end
-    return Vector3.new(x,y,z)
-end
-addButton("Salvar posicao atual como ponto DEFAULT",function()
-    if collectorBusy or collector.enabled then
-        collectionMessage("Desligue a coleta antes de alterar o ponto DEFAULT.")
-        return
-    end
-    local character=player.Character
-    local root=character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid=character and character:FindFirstChildOfClass("Humanoid")
-    if not root or not humanoid or humanoid.Health<=0 then
-        collectionMessage("Personagem indisponivel para salvar DEFAULT.");return
-    end
-    local position=root.Position
-    cfg.DefaultPoint={x=position.X,y=position.Y,z=position.Z,placeId=game.PlaceId}
-    local saved=false
-    if writefile then saved=pcall(function() writefile(CONFIG_FILE,Http:JSONEncode(cfg)) end) end
-    collectionMessage(string.format("DEFAULT salvo: %.2f, %.2f, %.2f. %s",position.X,position.Y,position.Z,
-        saved and "Mantido nas proximas execucoes." or "Valido nesta execucao; gravacao indisponivel."))
-end)
 local function startCollection(automatic)
     if collectorBusy then
         collectionMessage("Caminhada em andamento; cancele antes de iniciar outra.")
@@ -2053,9 +2028,6 @@ local function startCollection(automatic)
     if isHopping then
         collectionMessage("Cancele a busca de servidor antes do teste.")
         return
-    end
-    if not defaultPosition() then
-        collectionMessage("Salve primeiro o ponto DEFAULT dentro da Safe Zone neste mapa.");return
     end
     collector.automatic = automatic
     collector.mode = "walk"
@@ -2122,12 +2094,10 @@ local function runCollection(uid, model, rec)
         if root.Anchored or humanoid.WalkSpeed <= 0 then
             error("personagem imobilizado; saia da esteira antes do teste", 0)
         end
-        local origin = defaultPosition()
-        if not origin then error("Ponto DEFAULT indisponivel neste mapa",0) end
+        local origin = DEFAULT_POSITION
         local eggTarget = collectionDestination(model, rec)
         if not eggTarget then error("ovo sem posicao", 0) end
-        -- O ponto definido pelo usuario substitui a extensao estimada de 60 studs.
-        -- Deve ser salvo dentro da area segura de entrega.
+        -- Ponto fixo de preparacao e retorno, compartilhado por todos os usuarios.
         local returnTarget=origin
         diagnostics.delivery={confirmed=false,returnTarget={returnTarget.X,returnTarget.Y,returnTarget.Z}}
         -- Evidencia positiva do jogo, nunca apenas sumico de Drop/Triggered.
