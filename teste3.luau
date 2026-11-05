@@ -2141,11 +2141,33 @@ local function runCollection(uid, model, rec)
         end)
         local returnSeed=nil
         local function walkTo(target, returning)
+        -- Conserva a passagem pelo destino mesmo entre dois trechos/ComputeAsync.
+        local returnCrossed=false
+        local lastReturnPosition=root.Position
+        local function updateReturnCrossing()
+            if not returning or returnCrossed then return returnCrossed end
+            local current=root.Position
+            local delta=Vector3.new(current.X-lastReturnPosition.X,0,current.Z-lastReturnPosition.Z)
+            local offset=Vector3.new(target.X-lastReturnPosition.X,0,target.Z-lastReturnPosition.Z)
+            local lengthSquared=delta:Dot(delta)
+            local t=lengthSquared>0 and math.clamp(offset:Dot(delta)/lengthSquared,0,1) or 0
+            local horizontalMiss=(offset-delta*t).Magnitude
+            local height=lastReturnPosition.Y+(current.Y-lastReturnPosition.Y)*t
+            if horizontalMiss<=3 and math.abs(height-target.Y)<=math.max(6,humanoid.HipHeight+root.Size.Y/2+3) then
+                returnCrossed=true
+                recordDiagnostic("destino_retorno_cruzado",{position={current.X,current.Y,current.Z},miss=horizontalMiss})
+                -- Interrompe o comando antigo sem apontar de volta para o DEFAULT.
+                humanoid:MoveTo(current)
+            end
+            lastReturnPosition=current
+            return returnCrossed
+        end
         diagnostics.phase=returning and "volta" or "ida"
         recordDiagnostic("inicio",{target={target.X,target.Y,target.Z},walkSpeed=humanoid.WalkSpeed})
         if returning then
             diagnosticConnection=game:GetService("RunService").Heartbeat:Connect(function(dt)
                 if not active() then return end
+                updateReturnCrossing()
                 diagnostics.maxFrame=math.max(diagnostics.maxFrame,dt)
                 local velocity=root.AssemblyLinearVelocity
                 local actual=Vector3.new(velocity.X,0,velocity.Z).Magnitude
@@ -2400,6 +2422,7 @@ local function runCollection(uid, model, rec)
         end
         for segment=1,160 do
             if not active() or os.clock()>=deadline then break end
+            if updateReturnCrossing() then arrived=true;break end
             approachSpeed()
             if not returning and reached(target,4) then
                 arrived,failure=centerOnEgg()
@@ -2429,6 +2452,7 @@ local function runCollection(uid, model, rec)
                 end
                 if why then failure=why end
             end
+            if updateReturnCrossing() then arrived=true;break end
             if not active() or not route then break end
             lastRoute=route
             local waypoints,selectedGoal,finalLeg=route.points,route.goal,route.final
@@ -2458,6 +2482,7 @@ local function runCollection(uid, model, rec)
             for index=(#waypoints>1) and 2 or 1,#waypoints do
                 local point=waypoints[index]
                 if not active() or os.clock()>=deadline then break end
+                if updateReturnCrossing() then segmentReached=true;break end
                 if reached(selectedGoal,goalRadius) then segmentReached=true;break end
                 -- Antecipa o proximo destino em retas; conserva precisao nas curvas/pulos.
                 local reachRadius=2.5
@@ -2497,6 +2522,7 @@ local function runCollection(uid, model, rec)
                     local previousPosition=root.Position
                     local passed=false
                     while active() and os.clock()<timeout and not passed and not reached(point.Position,reachRadius) do
+                        if updateReturnCrossing() then segmentReached=true;break end
                         approachSpeed()
                         if reached(selectedGoal,goalRadius) then segmentReached=true;break end
                         if os.clock()>=nextMove then humanoid:MoveTo(point.Position);nextMove=os.clock()+0.2 end
@@ -2524,6 +2550,7 @@ local function runCollection(uid, model, rec)
                 end
             end
             if active() then
+                if updateReturnCrossing() then arrived=true;break end
                 if not returning and finalLeg and reached(target,4) then
                     arrived,failure=centerOnEgg()
                     break
@@ -2810,7 +2837,22 @@ local function runCollection(uid, model, rec)
                         local valueType=type(value)
                         attrs[key]=(valueType=="string" or valueType=="boolean" or valueType=="number") and value or tostring(value)
                     end
-                    observation.owners[#observation.owners+1]={path=owner:GetFullName(),attributes=attrs}
+                    -- Somente dados expostos por Instances; nao inspeciona closures do executor.
+                    local references={}
+                    local children=owner:GetChildren()
+                    for childIndex=1,math.min(#children,40) do
+                        local child=children[childIndex]
+                        if child:IsA("ObjectValue") then
+                            local value=child.Value
+                            references[#references+1]={name=child.Name,class=child.ClassName,
+                                value=value and value:GetFullName() or "nil",
+                                pointsToTarget=value~=nil and model~=nil and (value==model or value:IsDescendantOf(model)) or false}
+                        elseif child:IsA("StringValue") or child:IsA("IntValue") or child:IsA("NumberValue") then
+                            references[#references+1]={name=child.Name,class=child.ClassName,value=child.Value}
+                        end
+                    end
+                    observation.owners[#observation.owners+1]={path=owner:GetFullName(),class=owner.ClassName,
+                        attributes=attrs,references=references,childrenCount=#children}
                     owner=owner.Parent
                 end
                 observation.instance=nil
