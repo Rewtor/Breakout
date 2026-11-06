@@ -655,10 +655,10 @@ do
         Name = "FinderLauncherLayer", Size = UDim2.fromScale(1, 1),
         BackgroundTransparency = 1, Active = false,
     })
-    local fallback = button(overlay, "FINDER", UDim2.new(0, 12, 0.5, -96), UDim2.fromOffset(100, 64))
+    local fallback = button(overlay, "Hopper", UDim2.new(0, 12, 0.5, -96), UDim2.fromOffset(100, 64))
     local nativeButton, sourceButton, indexButton
     local watchers = {}
-    local finderColors = ColorSequence.new(Color3.fromRGB(255, 107, 2), Color3.fromRGB(255, 238, 1))
+    local finderColors = ColorSequence.new(Color3.fromRGB(120, 48, 216), Color3.fromRGB(203, 116, 255))
     fallback:FindFirstChildOfClass("UIGradient").Color = finderColors
     fallback:FindFirstChildOfClass("UIGradient").Rotation = -90
     local function openFinder()
@@ -725,11 +725,11 @@ do
         end
         local label = clone:FindFirstChild("txt", true) or clone:FindFirstChild("Label", true) or clone:FindFirstChild("TextLabel", true)
         if label and (label:IsA("TextLabel") or label:IsA("TextButton")) then
-            label.Text = "Finder"
+            label.Text = "Hopper"
         elseif clone:IsA("TextButton") then
-            clone.Text = "Finder"
+            clone.Text = "Hopper"
         else
-            label = text(clone, {Text = "Finder", TextScaled = true,
+            label = text(clone, {Text = "Hopper", TextScaled = true,
                 Size = UDim2.fromScale(1, 0.28), Position = UDim2.fromScale(0, 0.7),
                 TextXAlignment = Enum.TextXAlignment.Center, TextStrokeTransparency = 0})
         end
@@ -744,9 +744,9 @@ do
             or create("UIGradient", clone, {})
         gradient.Color, gradient.Rotation = finderColors, -90
         local stroke = clone:FindFirstChild("UIStroke")
-        if stroke and stroke:IsA("UIStroke") then stroke.Color = Color3.fromRGB(60, 24, 0) end
+        if stroke and stroke:IsA("UIStroke") then stroke.Color = Color3.fromRGB(43, 12, 75) end
         local light = clone:FindFirstChild("UIStrokeClr")
-        if light and light:IsA("UIStroke") then light.Color = Color3.fromRGB(255, 222, 55) end
+        if light and light:IsA("UIStroke") then light.Color = Color3.fromRGB(231, 183, 255) end
         local right = gameHud:FindFirstChild("RightButtons")
         local eggs = right and right:FindFirstChild("EggsButton")
         local eggIcon = eggs and eggs:FindFirstChild("ImageLabel")
