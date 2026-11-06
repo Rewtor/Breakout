@@ -45,6 +45,7 @@ local cfg = {
     I = 0,
     S = 0,
     WH = false,
+    FARM = false,
     AH = false,
     AHT = 60,
     PC = 1,
@@ -71,6 +72,7 @@ cfg.S = math.max(0, finite(cfg.S) or 0)
 cfg.AHT = math.max(5, finite(cfg.AHT) or 60)
 cfg.PC = tonumber(cfg.PC) == 2 and 2 or 1
 cfg.WH = cfg.WH == true
+cfg.FARM = cfg.FARM == true
 cfg.AH = cfg.AH == true
 
 -- Encerra a versao anterior que usa o mesmo nome.
@@ -231,7 +233,7 @@ local gui = create("ScreenGui", host, {
 })
 
 connect(gui.Destroying, function()
-    if stopCollection then stopCollection() end
+    if stopCollection then stopCollection(true) end
     alive = false
     hopGeneration = hopGeneration + 1
 
@@ -601,6 +603,10 @@ local function addToggle(label, value, callback)
     end)
 
     paint()
+    return function(newValue)
+        value=newValue==true
+        paint()
+    end
 end
 
 local function addButton(label, callback)
@@ -1738,11 +1744,23 @@ local collectionStatus = text(settings, {
 local function collectionMessage(message)
     if alive then collectionStatus.Text = message end
 end
-stopCollection = function()
+local updateFarmToggle=nil
+local function setFarmEnabled(value)
+    value=value==true
+    local changed=cfg.FARM~=value
+    cfg.FARM=value
+    if updateFarmToggle then updateFarmToggle(value) end
+    if changed and writefile then
+        local saved=pcall(function() writefile(CONFIG_FILE,Http:JSONEncode(cfg)) end)
+        if not saved then collectionMessage("Estado do farm alterado; nao foi possivel salvar as configuracoes.") end
+    end
+end
+stopCollection = function(preservePreference)
     if collector.returnMotionCleanup then collector.returnMotionCleanup();collector.returnMotionCleanup=nil end
     if collector.restoreSpeed then collector.restoreSpeed() end
     if collector.cleanup then collector.cleanup() end
     collector.enabled = false
+    if preservePreference~=true then setFarmEnabled(false) end
     collector.pending = false
     collector.generation = collector.generation + 1
     if collector.prompt then
@@ -1766,6 +1784,7 @@ local function startCollection(automatic)
         return
     end
     collector.automatic = automatic
+    setFarmEnabled(automatic)
     collector.mode = "walk"
     collector.enabled = true
     collector.finished = false
@@ -1776,9 +1795,16 @@ local function startCollection(automatic)
     collector.changedAt = os.clock()
     collectionMessage(automatic and "Farm ligado: buscando ovos com rendimento e tamanho aprovados no filtro do webhook..."
         or "Ida e volta: aguardando os ovos carregarem...")
+    return true
 end
 addButton("Coletar ovo mais caro e voltar", function() startCollection(false) end)
-addButton("ATIVAR farm continuo (filtro do webhook)", function() startCollection(true) end)
+updateFarmToggle=addToggle("Farm continuo (filtro do webhook)",cfg.FARM,function(value)
+    if value then
+        if not startCollection(true) then updateFarmToggle(cfg.FARM) end
+    else
+        stopCollection()
+    end
+end)
 addButton("DESLIGAR coleta / cancelar viagem", stopCollection)
 
 -- Posicao do registro, com alternativa pelo modelo visual.
@@ -2245,6 +2271,7 @@ local function runCollection(uid, model, rec)
         collector.pending=false
         if collector.automatic and collector.enabled then
             collector.enabled=false
+            setFarmEnabled(false)
             local reason=finalCarry and finalCarry.IsCarrying
                 and "personagem ainda carrega um ovo."
                 or "retorno incompleto ou estado do personagem indisponivel."
@@ -2399,6 +2426,9 @@ body.Visible = false
 minimizeButton.Text = "+"
 
 layout()
+
+-- Restaura o farm salvo quando o script e carregado novamente.
+if cfg.FARM then startCollection(true) end
 
 task.spawn(function()
     while alive do
