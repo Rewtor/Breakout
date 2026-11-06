@@ -101,6 +101,7 @@ local connections = {}
 local cached = {}
 local cacheState = {}
 local rows = {}
+local hudFont
 local selectedEgg
 local updatePreview
 
@@ -170,7 +171,9 @@ local function text(parent, properties)
         defaults[key] = value
     end
 
-    return create("TextLabel", parent, defaults)
+    local label = create("TextLabel", parent, defaults)
+    if hudFont then label.FontFace = hudFont end
+    return label
 end
 
 local function button(parent, title, position, size)
@@ -201,6 +204,7 @@ local function button(parent, title, position, size)
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     })
 
+    if hudFont then object.FontFace = hudFont end
     object.AutoButtonColor = false
     local scale = create("UIScale", object, {Scale = 1})
     local motion
@@ -436,8 +440,6 @@ local viewport = create("Frame", body, {
     Name = "ContentViewport", BackgroundTransparency = 1, ClipsDescendants = true,
 })
 list.Parent, settings.Parent = viewport, viewport
-local sidePanel = create("Frame", body, {BackgroundColor3 = Color3.fromRGB(36, 39, 43), BorderSizePixel = 0, ZIndex = 1})
-create("UIStroke", sidePanel, {Color = Color3.new(0, 0, 0), Thickness = 2})
 local preview = create("Frame", body, {BackgroundColor3 = Color3.fromRGB(65, 65, 65), BorderSizePixel = 0, ClipsDescendants = true})
 create("UIGradient", preview, {Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(140, 140, 140)), Rotation = 90})
 create("UIStroke", preview, {Color = Color3.new(0, 0, 0), Thickness = 2})
@@ -492,84 +494,78 @@ local function layout()
     if not alive then return end
     local view = gui.AbsoluteSize
     if view.X <= 0 or view.Y <= 0 then return end
+    -- O tamanho base e o do Index; as abas pertencem ao painel e deslizam junto.
+    local tabWidth = view.X < 430 and 68 or 88
+    local width = math.max(1, math.min(552, view.X - tabWidth - 40))
+    local height = math.max(1, math.min(316, view.Y - 32))
     local wasMobile = mobile
-    mobile = view.X < 480 or view.Y < 350
+    mobile = width < 430 or height < 280
     if wasMobile ~= mobile then viewVersion = viewVersion + 1 end
-    local width = math.max(1, math.min(760, view.X - 24))
-    local height = math.max(1, math.min(450, view.Y - 24))
-    headerHeight = 42
+    headerHeight = 40
     expandedSize = UDim2.fromOffset(width, height)
     main.Size = expandedSize
-    uiMotion.home = UDim2.fromOffset(view.X / 2, view.Y / 2)
+    uiMotion.home = UDim2.fromOffset((view.X - tabWidth - 10) / 2, view.Y / 2)
     uiMotion.hidden = UDim2.fromOffset(view.X + width / 2 + 28, view.Y / 2)
     if not uiMotion.animating then main.Visible = not minimized; main.Position = minimized and uiMotion.hidden or uiMotion.home end
     header.Size = UDim2.new(1, 0, 0, headerHeight)
-    title.Text, title.TextSize = "Egg Finder", 24
-    title.Position, title.Size = UDim2.fromOffset(9, 6), UDim2.new(1, -86, 0, 30)
+    title.Text, title.TextSize = "Egg Finder", 22
+    title.Position, title.Size = UDim2.fromOffset(9, 6), UDim2.new(1, -54, 0, 28)
     minimizeButton.Visible = false
-    closeButton.Size, closeButton.Position = UDim2.fromOffset(32, 32), UDim2.new(1, -37, 0, 5)
-    closeButton.TextSize = 25
-    body.Position, body.Size, body.Visible = UDim2.fromOffset(0, 42), UDim2.new(1, 0, 1, -42), true
-    local side = mobile and 0 or 84
-    local detail = mobile and 0 or 158
-    local top = mobile and 76 or 8
-    sidePanel.Visible = not mobile
-    sidePanel.Position, sidePanel.Size = UDim2.fromOffset(8, 8), UDim2.new(0, 72, 1, -54)
-    radarTab.Parent, settingsButton.Parent = body, body
+    closeButton.Size, closeButton.Position = UDim2.fromOffset(30, 30), UDim2.new(1, -35, 0, 5)
+    closeButton.TextSize = 24
+    body.Position, body.Size, body.Visible = UDim2.fromOffset(0, 40), UDim2.new(1, 0, 1, -40), true
+    radarTab.Parent, settingsButton.Parent = main, main
     radarTab.ZIndex, settingsButton.ZIndex = 2, 2
-    radarTab.Position, radarTab.Size = UDim2.fromOffset(12, 14), UDim2.fromOffset(64, 36)
-    settingsButton.Position, settingsButton.Size = UDim2.fromOffset(12, 58), UDim2.fromOffset(64, 40)
-    settingsButton.Text = "Ajustes\n& Farm"
-    for i, object in ipairs({sortButton, detailButton, pauseButton}) do
-        object.Parent, object.Visible = body, not uiMotion.settings
-        object.ZIndex = 2
-        object.Position, object.Size, object.TextSize = UDim2.fromOffset(12, 108 + (i - 1) * 42), UDim2.fromOffset(64, 34), 10
-    end
-    radarTab:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(Color3.fromRGB(105, 237, 42), Color3.fromRGB(28, 157, 17))
-    radarTab.TextTransparency, settingsButton.TextTransparency = uiMotion.settings and 0.3 or 0, uiMotion.settings and 0 or 0.3
-    if mobile then
-        radarTab.Position, radarTab.Size = UDim2.fromOffset(8, 6), UDim2.new(0.4, -12, 0, 30)
-        settingsButton.Position, settingsButton.Size = UDim2.new(0.4, 0, 0, 6), UDim2.new(0.6, -8, 0, 30)
-        settingsButton.Text = "Ajustes & Farm"
-        for i, object in ipairs({sortButton, detailButton, pauseButton}) do
-            object.Position, object.Size = UDim2.new((i - 1) / 3, 8, 0, 42), UDim2.new(1 / 3, -16, 0, 28)
-        end
-    end
-    mobileOptions.Visible = false
-    local contentWidth = width - side - (uiMotion.settings and 0 or detail) - 24
-    local bottom = uiMotion.settings and 82 or (mobile and 90 or 48)
-    viewport.Position = UDim2.fromOffset(side + 8, uiMotion.settings and (mobile and 42 or 8) or top)
-    viewport.Size = UDim2.new(0, contentWidth, 1, -(uiMotion.settings and (mobile and 42 or 8) or top) - bottom)
+    radarTab.Position, radarTab.Size = UDim2.new(1, 10, 0, 46), UDim2.fromOffset(tabWidth, 32)
+    settingsButton.Position, settingsButton.Size = UDim2.new(1, 10, 0, 86), UDim2.fromOffset(tabWidth, 32)
+    radarTab.Text, settingsButton.Text = "Ovos", "Ajustes"
+    radarTab.TextSize, settingsButton.TextSize = 18, 18
+    local active = ColorSequence.new(Color3.fromRGB(75, 229, 252), Color3.fromRGB(23, 137, 217))
+    local idle = ColorSequence.new(Color3.fromRGB(159, 125, 26), Color3.fromRGB(80, 59, 3))
+    radarTab:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and idle or active
+    settingsButton:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and active or idle
+    radarTab.TextTransparency, settingsButton.TextTransparency = uiMotion.settings and 0.2 or 0, uiMotion.settings and 0 or 0.2
+    -- Ordenacao, detalhes e pausa ficam nos Ajustes, sem ocupar a grade de ovos.
+    mobileOptions.Visible = true
+    mobileOptions.Size = UDim2.new(1, -8, 0, 72)
+    for _, object in ipairs({sortButton, detailButton, pauseButton}) do object.Parent, object.Visible = mobileOptions, true end
+    sortButton.Position, sortButton.Size = UDim2.new(), UDim2.new(1, 0, 0, 30)
+    detailButton.Position, detailButton.Size = UDim2.fromOffset(0, 38), UDim2.new(0.6, -4, 0, 30)
+    pauseButton.Position, pauseButton.Size = UDim2.new(0.6, 4, 0, 38), UDim2.new(0.4, -4, 0, 30)
+    local detail = mobile and 0 or 150
+    local contentWidth = width - (uiMotion.settings and 0 or detail) - 24
+    local bottom = uiMotion.settings and 70 or (mobile and 76 or 38)
+    viewport.Position, viewport.Size = UDim2.fromOffset(8, 8), UDim2.new(0, contentWidth, 1, -8 - bottom)
     list.Position, list.Size = UDim2.new(), UDim2.fromScale(1, 1)
     settings.Position, settings.Size = UDim2.new(), UDim2.fromScale(1, 1)
     local columns = math.clamp(math.floor((contentWidth + 6) / 78), 1, 4)
     eggGrid.CellPadding = UDim2.fromOffset(6, 6)
-    eggGrid.CellSize = UDim2.fromOffset(math.floor((contentWidth - (columns - 1) * 6 - 6) / columns), compact and 114 or 260)
+    eggGrid.CellSize = UDim2.fromOffset(math.floor((contentWidth - (columns - 1) * 6 - 6) / columns), compact and 112 or 246)
     preview.Visible = not mobile and not uiMotion.settings
-    preview.Position, preview.Size = UDim2.new(1, -166, 0, 8), UDim2.new(0, 154, 1, -120)
-    local previewHeight = height - headerHeight - 120
-    local iconHeight = math.clamp(previewHeight - 118, 40, 110)
+    preview.Position, preview.Size = UDim2.new(1, -154, 0, 8), UDim2.new(0, 146, 1, -86)
+    local previewHeight = height - headerHeight - 86
+    local iconHeight = math.clamp(previewHeight - 108, 40, 90)
     previewIcon.Size = UDim2.new(0.8, 0, 0, iconHeight)
-    previewTitle.Position, previewTitle.Size = UDim2.fromOffset(6, iconHeight + 16), UDim2.new(1, -12, 0, 36)
-    previewTitle.TextSize, previewTitle.TextTruncate = 13, Enum.TextTruncate.AtEnd
-    previewValue.Position, previewValue.Size = UDim2.fromOffset(6, iconHeight + 55), UDim2.new(1, -12, 0, 21)
-    previewMeta.Position, previewMeta.Size = UDim2.fromOffset(6, iconHeight + 80), UDim2.new(1, -12, 0, 30)
+    previewTitle.Position, previewTitle.Size = UDim2.fromOffset(6, iconHeight + 16), UDim2.new(1, -12, 0, 34)
+    previewTitle.TextSize, previewTitle.TextTruncate = 12, Enum.TextTruncate.AtEnd
+    previewValue.Position, previewValue.Size = UDim2.fromOffset(6, iconHeight + 52), UDim2.new(1, -12, 0, 20)
+    previewMeta.Position, previewMeta.Size = UDim2.fromOffset(6, iconHeight + 76), UDim2.new(1, -12, 0, 28)
     previewMeta.TextSize, previewMeta.TextTruncate = 9, Enum.TextTruncate.AtEnd
-    previewMeta.Visible = true
+    previewMeta.Visible = previewHeight >= iconHeight + 104
     stat.Visible = true
-    stat.Position, stat.Size = UDim2.new(0, 8, 1, -36), UDim2.new(1, mobile and -16 or -182, 0, 28)
-    hopStatus.Visible = uiMotion.settings
-    hopStatus.Position, hopStatus.Size = UDim2.new(0, side + 12, 1, -78), UDim2.new(1, -side - 24, 0, 20)
-    hopButton.Position, hopButton.Size = UDim2.new(1, -166, 1, -104), UDim2.fromOffset(154, 34)
-    cancelButton.Position, cancelButton.Size = UDim2.new(1, -166, 1, -62), UDim2.fromOffset(154, 26)
+    stat.Position = UDim2.new(0, 8, 1, -32)
+    stat.Size = UDim2.fromOffset((uiMotion.settings or mobile) and width - 16 or contentWidth, 24)
+    stat.TextSize = 13
+    hopStatus.Visible = false
+    hopButton.Position, hopButton.Size = UDim2.new(1, -154, 1, -72), UDim2.fromOffset(146, 30)
+    cancelButton.Position, cancelButton.Size = UDim2.new(1, -154, 1, -34), UDim2.fromOffset(146, 24)
     if mobile or uiMotion.settings then
-        hopButton.Position, hopButton.Size = UDim2.new(0, side + 8, 1, -78), UDim2.new(0.65, -side - 12, 0, 32)
-        cancelButton.Position, cancelButton.Size = UDim2.new(0.65, 0, 1, -78), UDim2.new(0.35, -12, 0, 32)
-        hopStatus.Visible = false
+        hopButton.Position, hopButton.Size = UDim2.new(0, 8, 1, -68), UDim2.new(0.65, -12, 0, 28)
+        cancelButton.Position, cancelButton.Size = UDim2.new(0.65, 0, 1, -68), UDim2.new(0.35, -8, 0, 28)
     end
     cancelButton.Visible = true
     footer.Visible = false
-    empty.Position, empty.Size = UDim2.fromOffset(side + 18, top + 12), UDim2.new(0, contentWidth - 20, 0, 48)
+    empty.Position, empty.Size = UDim2.fromOffset(16, 16), UDim2.new(0, contentWidth - 16, 0, 48)
     empty.Visible = not uiMotion.settings and #sorted == 0
     refreshHopButton()
     if refreshFinder then refreshFinder() end
@@ -718,6 +714,13 @@ do
                 Size = UDim2.fromScale(1, 0.28), Position = UDim2.fromScale(0, 0.7),
                 TextXAlignment = Enum.TextXAlignment.Center, TextStrokeTransparency = 0})
         end
+        local fontSource = label or (clone:IsA("TextButton") and clone)
+        if fontSource then
+            hudFont = fontSource.FontFace
+            for _, object in ipairs(main:GetDescendants()) do
+                if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then object.FontFace = hudFont end
+            end
+        end
         local gradient = clone:FindFirstChildOfClass("UIGradient")
             or create("UIGradient", clone, {})
         gradient.Color, gradient.Rotation = finderColors, -90
@@ -810,7 +813,8 @@ local function addBox(label, value, callback)
         TextSize = 15,
     })
 
-    create("UICorner", box, {CornerRadius = UDim.new(0, 6)})
+    if hudFont then box.FontFace = hudFont end
+    create("UICorner", box, {CornerRadius = UDim.new(0, 2)})
     connect(box.FocusLost, function() callback(box.Text) end)
 end
 
@@ -2696,8 +2700,8 @@ local function scan()
         end
 
         setText(stat, string.format(
-            "%s  |  Ovos: %d  |  Alvos: %d  |  $%s/s",
-            stateText, total, targets, short(best)
+            "%s  |  %d ovos  |  %d alvos",
+            stateText, total, targets
         ))
     end
 
