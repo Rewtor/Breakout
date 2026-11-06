@@ -10,6 +10,7 @@ local Http = game:GetService("HttpService")
 local UIS = game:GetService("UserInputService")
 local RS = game:GetService("ReplicatedStorage")
 local Teleport = game:GetService("TeleportService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 assert(player, "Execute no cliente.")
@@ -151,6 +152,8 @@ local function text(parent, properties)
         TextColor3 = Color3.fromRGB(229, 233, 243),
         Font = Enum.Font.FredokaOne,
         TextSize = 13,
+        TextStrokeColor3 = Color3.fromRGB(13, 20, 34),
+        TextStrokeTransparency = 0.55,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Top,
         TextWrapped = true,
@@ -172,9 +175,9 @@ local function button(parent, title, position, size)
         BackgroundColor3 = Color3.new(1, 1, 1),
         TextColor3 = Color3.new(1, 1, 1),
         Font = Enum.Font.FredokaOne,
-        TextStrokeColor3 = Color3.fromRGB(21, 12, 48),
+        TextStrokeColor3 = Color3.fromRGB(12, 28, 61),
         TextStrokeTransparency = 0.25,
-        TextSize = 12,
+        TextSize = 13,
         BorderSizePixel = 0,
     })
 
@@ -183,14 +186,32 @@ local function button(parent, title, position, size)
     })
 
     create("UIGradient", object, {
-        Color = ColorSequence.new(Color3.fromRGB(158, 96, 255), Color3.fromRGB(88, 46, 180)),
+        Color = ColorSequence.new(Color3.fromRGB(81, 177, 255), Color3.fromRGB(31, 98, 194)),
         Rotation = 90,
     })
     create("UIStroke", object, {
-        Color = Color3.fromRGB(34, 16, 67), Thickness = 2,
+        Color = Color3.fromRGB(12, 31, 65), Thickness = 2,
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     })
 
+    object.AutoButtonColor = false
+    local scale = create("UIScale", object, {Scale = 1})
+    local motion
+    local hovering = false
+    local function animate(value)
+        if motion then motion:Cancel() end
+        motion = TweenService:Create(scale, TweenInfo.new(0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = value})
+        motion:Play()
+    end
+    connect(object.MouseEnter, function() hovering = true; animate(1.025) end)
+    connect(object.MouseLeave, function() hovering = false; animate(1) end)
+    connect(object.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then animate(0.96) end
+    end)
+    connect(object.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then animate(hovering and 1.025 or 1) end
+    end)
+    connect(object.Destroying, function() if motion then motion:Cancel() end end)
     return object
 end
 
@@ -236,6 +257,7 @@ local lastValidEggTime = os.clock()
 -- INTERFACE
 -- =========================================================
 
+local uiMotion = {generation = 0, tabGeneration = 0, animating = false, settings = false}
 local gui = create("ScreenGui", host, {
     Name = "DiceRadarGUI",
     ResetOnSpawn = false,
@@ -246,6 +268,10 @@ local gui = create("ScreenGui", host, {
 connect(gui.Destroying, function()
     if stopCollection then stopCollection(true) end
     alive = false
+    uiMotion.generation = uiMotion.generation + 1
+    if uiMotion.panel then uiMotion.panel:Cancel() end
+    if uiMotion.shade then uiMotion.shade:Cancel() end
+    if uiMotion.tab then uiMotion.tab:Cancel() end
     hopGeneration = hopGeneration + 1
 
     for _, connection in ipairs(connections) do
@@ -254,40 +280,50 @@ connect(gui.Destroying, function()
     table.clear(connections)
 end)
 
+local shade = create("TextButton", gui, {
+    Name = "PanelBackdrop", Size = UDim2.fromScale(1, 1), Text = "",
+    BackgroundColor3 = Color3.fromRGB(12, 15, 28), BackgroundTransparency = 1,
+    AutoButtonColor = false, BorderSizePixel = 0, Visible = false,
+})
 local main = create("Frame", gui, {
+    Name = "FinderPanel", AnchorPoint = Vector2.new(0.5, 0.5),
     Size = UDim2.fromOffset(430, 500),
     Position = UDim2.fromOffset(10, 10),
-    BackgroundColor3 = Color3.fromRGB(28, 20, 47),
+    BackgroundColor3 = Color3.fromRGB(27, 32, 49),
     BorderSizePixel = 0,
     Active = true,
 })
 
 create("UICorner", main, {CornerRadius = UDim.new(0, 16)})
+create("UIGradient", main, {
+    Color = ColorSequence.new(Color3.fromRGB(222, 232, 255), Color3.fromRGB(145, 158, 192)),
+    Rotation = 90,
+})
 create("UIStroke", main, {
-    Color = Color3.fromRGB(164, 112, 244),
+    Color = Color3.fromRGB(61, 29, 5),
     Thickness = 3,
 })
 
 local header = create("Frame", main, {
     Size = UDim2.new(1, -106, 0, 50),
-    BackgroundColor3 = Color3.fromRGB(100, 57, 170),
+    BackgroundColor3 = Color3.new(1, 1, 1),
     BorderSizePixel = 0,
     Active = true,
 })
 create("UICorner", header, {CornerRadius = UDim.new(0, 13)})
 create("UIGradient", header, {
-    Color = ColorSequence.new(Color3.fromRGB(201, 121, 255), Color3.fromRGB(96, 54, 180)),
-    Rotation = 12,
+    Color = ColorSequence.new(Color3.fromRGB(255, 238, 1), Color3.fromRGB(255, 107, 2)),
+    Rotation = 90,
 })
 
 local title = text(header, {
     Text = "EGG FINDER",
     Font = Enum.Font.FredokaOne,
-    TextStrokeColor3 = Color3.fromRGB(37, 16, 64),
+    TextStrokeColor3 = Color3.fromRGB(83, 37, 0),
     TextStrokeTransparency = 0,
     TextSize = 16,
     Position = UDim2.fromOffset(14, 14),
-    Size = UDim2.new(1, -14, 1, -14),
+    Size = UDim2.new(1, -116, 1, -14),
     TextWrapped = false,
     TextTruncate = Enum.TextTruncate.AtEnd,
 })
@@ -303,6 +339,7 @@ local closeButton = button(
     UDim2.new(1, -50, 0, 5),
     UDim2.fromOffset(44, 44)
 )
+closeButton:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(Color3.fromRGB(255, 104, 88), Color3.fromRGB(210, 39, 43))
 
 local body = create("Frame", main, {
     Position = UDim2.fromOffset(0, 50),
@@ -369,6 +406,8 @@ local hopStatus = text(body, {
 local settingsButton = button(body, "Ajustes", UDim2.new(), UDim2.new())
 local hopButton = button(body, "Trocar servidor", UDim2.new(), UDim2.new())
 local cancelButton = button(body, "Cancelar", UDim2.new(), UDim2.new())
+hopButton:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(Color3.fromRGB(137, 235, 78), Color3.fromRGB(48, 146, 48))
+cancelButton:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(Color3.fromRGB(255, 113, 94), Color3.fromRGB(183, 45, 54))
 
 local footer = text(body, {
     Text = "Encontre ovos, ajuste seus filtros e acompanhe o farm.\nRenda e tamanho estimados pelos dados disponíveis.",
@@ -376,6 +415,11 @@ local footer = text(body, {
     TextColor3 = Color3.fromRGB(170, 181, 199),
 })
 
+local radarTab = button(body, "OVOS", UDim2.new(), UDim2.new())
+local viewport = create("Frame", body, {
+    Name = "ContentViewport", BackgroundTransparency = 1, ClipsDescendants = true,
+})
+list.Parent, settings.Parent = viewport, viewport
 local expandedSize = main.Size
 local headerHeight = 50
 local refreshFinder
@@ -394,142 +438,122 @@ local function setHopState(value, message)
     end
 end
 
-local function clampPosition()
-    local view = gui.AbsoluteSize
-    if view.X <= 0 or view.Y <= 0 then return end
-
-    local width = main.Size.X.Offset
-    local height = main.Size.Y.Offset
-    local x = main.Position.X.Scale * view.X + main.Position.X.Offset
-    local yy = main.Position.Y.Scale * view.Y + main.Position.Y.Offset
-
-    main.Position = UDim2.fromOffset(
-        math.clamp(x, 0, math.max(0, view.X - width)),
-        math.clamp(yy, 0, math.max(0, view.Y - height))
-    )
-end
-
+-- Transicoes iguais ao ritmo do Finder nativo: Back/Out ao abrir, Quad/In ao sair.
 local function layout()
     if not alive then return end
-
     local view = gui.AbsoluteSize
     if view.X <= 0 or view.Y <= 0 then return end
-
-    local previousMobile = mobile
-    mobile = UIS.TouchEnabled or view.X < 640 or view.Y < 500
-
-    if previousMobile ~= mobile then
-        viewVersion = viewVersion + 1
-    end
-
-    headerHeight = mobile and 50 or 46
-
-    local width = mobile and math.min(430, view.X - 16)
-        or math.min(570, view.X - 32)
-    local height = mobile and (view.Y - 16)
-        or math.min(760, view.Y * 0.82)
-
-    width = math.max(1, width)
-    height = math.max(1, height)
-
+    local wasMobile = mobile
+    mobile = UIS.TouchEnabled or view.X < 700
+    if wasMobile ~= mobile then viewVersion = viewVersion + 1 end
+    local width = math.max(1, math.min(mobile and 460 or 640, view.X - 28))
+    local height = math.max(1, math.min(730, view.Y - 28))
+    local tight = view.Y < 440
+    local tiny = view.Y < 360
+    headerHeight = tight and 50 or 62
     expandedSize = UDim2.fromOffset(width, height)
-    main.Visible = not minimized
-    main.Size = minimized and UDim2.fromOffset(width, headerHeight)
-        or expandedSize
-
-    header.Size = UDim2.new(1, mobile and -106 or -90, 0, headerHeight)
-    title.Text = mobile and "EGG FINDER" or "EGG FINDER  /  RADAR"
-    title.TextSize = mobile and 16 or 17
-
-    minimizeButton.Size = UDim2.fromOffset(mobile and 44 or 30, mobile and 44 or 28)
-    closeButton.Size = minimizeButton.Size
-    minimizeButton.Position = UDim2.new(1, mobile and -100 or -80, 0, mobile and 5 or 9)
-    closeButton.Position = UDim2.new(1, mobile and -50 or -42, 0, mobile and 5 or 9)
-
-    body.Position = UDim2.fromOffset(0, headerHeight)
-    body.Size = UDim2.new(1, 0, 1, -headerHeight)
-
-    mobileOptions.Visible = mobile
-    sortButton.Parent = mobile and mobileOptions or body
-    detailButton.Parent = mobile and mobileOptions or body
-    pauseButton.Parent = mobile and mobileOptions or body
-
-    if mobile then
-        sortButton.Position = UDim2.new()
-        sortButton.Size = UDim2.new(1, 0, 0, 44)
-        detailButton.Position = UDim2.fromOffset(0, 52)
-        detailButton.Size = UDim2.new(0.56, -4, 0, 44)
-        pauseButton.Position = UDim2.new(0.56, 4, 0, 52)
-        pauseButton.Size = UDim2.new(0.44, -4, 0, 44)
-
-        list.Position = UDim2.fromOffset(10, 4)
-        list.Size = UDim2.new(1, -20, 1, -62)
-        settings.Position = UDim2.fromOffset(10, 4)
-        settings.Size = UDim2.new(1, -20, 1, -94)
-
-        hopStatus.Position = UDim2.new(0, 10, 1, -84)
-        hopStatus.Size = UDim2.new(1, -20, 0, 28)
-        settingsButton.Position = UDim2.new(0, 10, 1, -50)
-        settingsButton.Size = UDim2.new(0.4, -14, 0, 44)
-        hopButton.Position = UDim2.new(0.4, 4, 1, -50)
-        hopButton.Size = UDim2.new(0.6, -14, 0, 44)
-    else
-        sortButton.Position = UDim2.fromOffset(12, 0)
-        sortButton.Size = UDim2.new(0.40, -12, 0, 30)
-        detailButton.Position = UDim2.new(0.40, 5, 0, 0)
-        detailButton.Size = UDim2.new(0.34, -10, 0, 30)
-        pauseButton.Position = UDim2.new(0.74, 0, 0, 0)
-        pauseButton.Size = UDim2.new(0.26, -12, 0, 30)
-
-        stat.Position = UDim2.fromOffset(12, 38)
-        list.Position = UDim2.fromOffset(10, 90)
-        list.Size = UDim2.new(1, -20, 1, -205)
-        settings.Position = list.Position
-        settings.Size = list.Size
-
-        hopStatus.Position = UDim2.new(0, 12, 1, -106)
-        hopStatus.Size = UDim2.new(1, -24, 0, 28)
-        settingsButton.Position = UDim2.new(0, 12, 1, -73)
-        settingsButton.Size = UDim2.new(0.36, -16, 0, 30)
-        hopButton.Position = UDim2.new(0.36, 0, 1, -73)
-        hopButton.Size = UDim2.new(0.38, -6, 0, 30)
-        cancelButton.Position = UDim2.new(0.74, 0, 1, -73)
-        cancelButton.Size = UDim2.new(0.26, -12, 0, 30)
+    main.Size = expandedSize
+    uiMotion.home = UDim2.fromOffset(view.X / 2, view.Y / 2)
+    uiMotion.hidden = UDim2.fromOffset(view.X + width / 2 + 28, view.Y / 2)
+    if not uiMotion.animating then
+        main.Visible = not minimized
+        main.Position = minimized and uiMotion.hidden or uiMotion.home
     end
-
-    footer.Position = UDim2.new(0, 12, 1, -37)
-    footer.Size = UDim2.new(1, -24, 0, 34)
-    footer.Visible = not mobile
-    stat.Visible = not mobile
-    cancelButton.Visible = not mobile
-    hopStatus.Visible = not mobile or settings.Visible
-
-    settingsButton.Text = settings.Visible and "Voltar"
-        or (mobile and "Ajustes" or "Configurações")
-
+    header.Size = UDim2.new(1, 0, 0, headerHeight)
+    title.Text, title.TextSize = width < 300 and "FINDER" or "EGG FINDER", mobile and 24 or 28
+    title.Position = UDim2.fromOffset(18, tight and 9 or 15)
+    minimizeButton.Size, closeButton.Size = UDim2.fromOffset(38, 38), UDim2.fromOffset(38, 38)
+    minimizeButton.Position = UDim2.new(1, -92, 0, (headerHeight - 38) / 2)
+    closeButton.Position = UDim2.new(1, -48, 0, (headerHeight - 38) / 2)
+    body.Position, body.Size = UDim2.fromOffset(0, headerHeight), UDim2.new(1, 0, 1, -headerHeight)
+    body.Visible = true
+    radarTab.Position, radarTab.Size = UDim2.fromOffset(14, 10), UDim2.new(0.4, -18, 0, 38)
+    settingsButton.Position, settingsButton.Size = UDim2.new(0.4, 4, 0, 10), UDim2.new(0.6, -18, 0, 38)
+    settingsButton.Text = "AJUSTES & FARM"
+    local active = ColorSequence.new(Color3.fromRGB(255, 222, 65), Color3.fromRGB(239, 144, 24))
+    local idle = ColorSequence.new(Color3.fromRGB(93, 118, 167), Color3.fromRGB(48, 66, 103))
+    radarTab:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and idle or active
+    settingsButton:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and active or idle
+    mobileOptions.Visible = false
+    for _, object in ipairs({sortButton, detailButton, pauseButton}) do
+        object.Parent = body
+        object.Visible = not uiMotion.settings and not tiny
+    end
+    sortButton.Position, sortButton.Size = UDim2.fromOffset(14, 57), UDim2.new(0.42, -18, 0, 34)
+    detailButton.Position, detailButton.Size = UDim2.new(0.42, 0, 0, 57), UDim2.new(0.34, -8, 0, 34)
+    pauseButton.Position, pauseButton.Size = UDim2.new(0.76, 0, 0, 57), UDim2.new(0.24, -14, 0, 34)
+    stat.Position, stat.Size = UDim2.fromOffset(16, 99), UDim2.new(1, -32, 0, 38)
+    stat.Visible = not tight and not uiMotion.settings
+    local top = (uiMotion.settings or tiny) and 58 or (tight and 101 or 143)
+    viewport.Position, viewport.Size = UDim2.fromOffset(12, top), UDim2.new(1, -24, 1, -top - (tiny and 56 or 88))
+    list.Position, list.Size = UDim2.new(), UDim2.fromScale(1, 1)
+    settings.Position, settings.Size = UDim2.new(), UDim2.fromScale(1, 1)
+    hopStatus.Position, hopStatus.Size = UDim2.new(0, 16, 1, -83), UDim2.new(1, -32, 0, 20)
+    hopStatus.Visible = not tiny
+    hopButton.Position, hopButton.Size = UDim2.new(0, 14, 1, tiny and -46 or -59), UDim2.new(0.7, -18, 0, tiny and 34 or 40)
+    cancelButton.Position, cancelButton.Size = UDim2.new(0.7, 0, 1, tiny and -46 or -59), UDim2.new(0.3, -14, 0, tiny and 34 or 40)
+    cancelButton.Visible = true
+    footer.Visible = false
     refreshHopButton()
     if refreshFinder then refreshFinder() end
-    clampPosition()
     if render then render() end
 end
 
-connect(gui:GetPropertyChangedSignal("AbsoluteSize"), layout)
-
-connect(settingsButton.Activated, function()
-    settings.Visible = not settings.Visible
-    list.Visible = not settings.Visible
+local function setPanelOpen(open)
+    if not alive then return end
+    uiMotion.generation = uiMotion.generation + 1
+    local generation = uiMotion.generation
+    local wasVisible = main.Visible
+    if uiMotion.panel then uiMotion.panel:Cancel() end
+    if uiMotion.shade then uiMotion.shade:Cancel() end
+    uiMotion.animating = true
+    minimized = not open
+    layout()
+    main.Visible, shade.Visible = true, true
+    if open and not wasVisible then main.Position = uiMotion.hidden end
+    local info = open and TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        or TweenInfo.new(0.24, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local tween = TweenService:Create(main, info, {Position = open and uiMotion.home or uiMotion.hidden})
+    uiMotion.panel = tween
+    uiMotion.shade = TweenService:Create(shade, TweenInfo.new(0.2), {BackgroundTransparency = open and 0.6 or 1})
+    if uiMotion.completed then uiMotion.completed:Disconnect() end
+    uiMotion.completed = tween.Completed:Connect(function(state)
+        if state ~= Enum.PlaybackState.Completed or generation ~= uiMotion.generation or not alive then return end
+        uiMotion.animating = false
+        main.Visible, shade.Visible = open, open
+        uiMotion.completed:Disconnect()
+        uiMotion.completed = nil
+    end)
+    uiMotion.shade:Play()
+    tween:Play()
+end
+connect(gui.Destroying, function() if uiMotion.completed then uiMotion.completed:Disconnect() end end)
+connect(gui:GetPropertyChangedSignal("AbsoluteSize"), function()
+    uiMotion.generation = uiMotion.generation + 1
+    if uiMotion.panel then uiMotion.panel:Cancel() end
+    if uiMotion.shade then uiMotion.shade:Cancel() end
+    if uiMotion.tab then uiMotion.tab:Cancel() end
+    uiMotion.animating = false
+    shade.Visible, shade.BackgroundTransparency = not minimized, minimized and 1 or 0.6
     layout()
 end)
-
-connect(minimizeButton.Activated, function()
-    minimized = not minimized
-    body.Visible = not minimized
-    minimizeButton.Text = minimized and "+" or "—"
+local function selectTab(showSettings)
+    if uiMotion.tab then uiMotion.tab:Cancel() end
+    uiMotion.settings = showSettings
+    settings.Visible, list.Visible = showSettings, not showSettings
     layout()
-end)
-
-connect(closeButton.Activated, function()
-    gui:Destroy()
+    local incoming = showSettings and settings or list
+    incoming.Position = UDim2.fromOffset(showSettings and 28 or -28, 0)
+    uiMotion.tab = TweenService:Create(incoming, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new()})
+    uiMotion.tab:Play()
+end
+connect(radarTab.Activated, function() selectTab(false) end)
+connect(settingsButton.Activated, function() selectTab(true) end)
+connect(minimizeButton.Activated, function() setPanelOpen(false) end)
+connect(closeButton.Activated, function() setPanelOpen(false) end)
+connect(shade.Activated, function() setPanelOpen(false) end)
+connect(UIS.InputBegan, function(input, processed)
+    if not processed and input.KeyCode == Enum.KeyCode.Escape and not minimized then setPanelOpen(false) end
 end)
 
 -- O launcher herda a aparencia do HUD, mas vive na nossa GUI: nao altera
@@ -546,10 +570,7 @@ do
     fallback:FindFirstChildOfClass("UIGradient").Color = finderColors
     fallback:FindFirstChildOfClass("UIGradient").Rotation = -90
     local function openFinder()
-        minimized = not minimized
-        body.Visible = not minimized
-        minimizeButton.Text = minimized and "+" or "—"
-        layout()
+        setPanelOpen(minimized)
     end
     connect(fallback.Activated, openFinder)
     local function disconnectNative()
@@ -682,44 +703,14 @@ do
     end)
 end
 
-local dragInput, dragStart, startPosition
-
-connect(header.InputBegan, function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-        dragStart = input.Position
-        startPosition = main.Position
-    end
-end)
-
-connect(UIS.InputEnded, function(input)
-    if input == dragInput then dragInput = nil end
-end)
-
-connect(UIS.InputChanged, function(input)
-    if not dragInput then return end
-
-    if input == dragInput
-        or (
-            dragInput.UserInputType == Enum.UserInputType.MouseButton1
-            and input.UserInputType == Enum.UserInputType.MouseMovement
-        ) then
-        local delta = input.Position - dragStart
-        main.Position = UDim2.new(
-            startPosition.X.Scale, startPosition.X.Offset + delta.X,
-            startPosition.Y.Scale, startPosition.Y.Offset + delta.Y
-        )
-        clampPosition()
-    end
-end)
-
 local function addBox(label, value, callback)
     local frame = create("Frame", settings, {
         Size = UDim2.new(1, -8, 0, 74),
-        BackgroundTransparency = 1,
+        BackgroundColor3 = Color3.fromRGB(40, 49, 70),
+        BorderSizePixel = 0,
     })
 
+    create("UICorner", frame, {CornerRadius = UDim.new(0, 10)})
     text(frame, {
         Text = label,
         Position = UDim2.fromOffset(2, 0),
@@ -732,7 +723,7 @@ local function addBox(label, value, callback)
         Size = UDim2.new(1, 0, 0, 46),
         Text = tostring(value),
         ClearTextOnFocus = false,
-        BackgroundColor3 = Color3.fromRGB(43, 31, 65),
+        BackgroundColor3 = Color3.fromRGB(27, 35, 53),
         BorderSizePixel = 0,
         TextColor3 = Color3.new(1, 1, 1),
         Font = Enum.Font.FredokaOne,
@@ -794,15 +785,28 @@ local function addButton(label, callback)
     return btn
 end
 
+local function addSection(label)
+    return text(settings, {
+        Text = label, Size = UDim2.new(1, -8, 0, 30), TextSize = 19,
+        TextColor3 = Color3.fromRGB(255, 220, 97),
+        TextYAlignment = Enum.TextYAlignment.Center,
+    })
+end
+
+local unloadButton = addButton("Encerrar script", function() gui:Destroy() end)
+unloadButton.Parent.LayoutOrder = 1000
+
 local function filtersChanged()
     viewVersion = viewVersion + 1
     lastValidEggTime = os.clock()
     if render then render() end
 end
 
+addSection("NOTIFICAÇÕES")
 addBox("Webhook URL", cfg.W, function(v) cfg.W = v end)
 addBox("Ping Discord ID", cfg.P, function(v) cfg.P = v end)
 
+addSection("FILTROS & SERVIDORES")
 addBox("Rendimento mínimo ($/s)", cfg.I, function(v)
     cfg.I = math.max(0, finite(v) or 0)
     filtersChanged()
@@ -906,13 +910,13 @@ render = function()
 
         if not row then
             local frame = create("Frame", list, {
-                BackgroundColor3 = Color3.fromRGB(43, 31, 65),
+                BackgroundColor3 = Color3.fromRGB(38, 48, 69),
                 BorderSizePixel = 0,
             })
 
             create("UICorner", frame, {CornerRadius = UDim.new(0, 8)})
             create("UIStroke", frame, {
-                Color = Color3.fromRGB(88, 64, 127), Thickness = 1.5,
+                Color = Color3.fromRGB(93, 121, 162), Thickness = 1.5,
                 ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             })
 
@@ -1941,6 +1945,7 @@ connect(game:GetService("RunService").Heartbeat,function(dt)
     promptAnchors.elapsed=0
     promptAnchors.sample()
 end)
+addSection("FARM & COLETA")
 local collectionStatus = text(settings, {
     Text = "Coleta desligada.", Size = UDim2.new(1, -8, 0, 64),
     LayoutOrder = 100,
@@ -2604,8 +2609,8 @@ local function scan()
         task.spawn(doServerHop)
     end
 
-    if not minimized and not mobile then
-        local stateText = "Monitorando o mapa"
+    if not minimized then
+        local stateText = cfg.FARM and "Farm ligado" or "Radar ativo"
 
         if cfg.AH and targets == 0 and not collector.enabled then
             local remaining = math.max(
@@ -2615,7 +2620,7 @@ local function scan()
         end
 
         setText(stat, string.format(
-            "%s\nOvos: %d • Alvos: %d\nMelhor: $%s/s",
+            "%s  •  %d ovos  •  %d alvos\nMelhor ovo: $%s/s",
             stateText, total, targets, short(best)
         ))
     end
@@ -2628,8 +2633,8 @@ local function scan()
     render()
 end
 
-body.Visible = false
-minimizeButton.Text = "+"
+body.Visible = true
+minimizeButton.Text = "—"
 
 layout()
 
