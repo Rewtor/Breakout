@@ -47,6 +47,7 @@ local cfg = {
     S = 0,
     WH = false,
     FARM = false,
+    OUTBOUND_JUMP = false,
     AH = false,
     AHT = 60,
     PC = 1,
@@ -74,6 +75,7 @@ cfg.AHT = math.max(5, finite(cfg.AHT) or 60)
 cfg.PC = tonumber(cfg.PC) == 2 and 2 or 1
 cfg.WH = cfg.WH == true
 cfg.FARM = cfg.FARM == true
+cfg.OUTBOUND_JUMP = cfg.OUTBOUND_JUMP == true
 cfg.AH = cfg.AH == true
 
 -- Encerra a versao anterior que usa o mesmo nome.
@@ -2114,6 +2116,34 @@ updateFarmToggle=addToggle("Farm continuo (filtro do webhook)",cfg.FARM,function
     end
 end)
 addButton("DESLIGAR coleta / cancelar viagem", stopCollection)
+addToggle("Salto experimental na ida", cfg.OUTBOUND_JUMP, function(value)
+    cfg.OUTBOUND_JUMP = value
+end)
+
+-- Uma tentativa por ida; sem alterar o verificador de movimento do jogo.
+-- A aproximacao final e a volta continuam no controlador de caminhada.
+local function tryOutboundJump(root, humanoid, target, allowed, readCarry)
+    if not allowed() then return false, "cancelado" end
+    local carry = readCarry()
+    if not carry or carry.IsCarrying then return false, "posse indisponivel ou ovo ja carregado" end
+    if root.Anchored or humanoid.Health <= 0 then return false, "personagem indisponivel" end
+    local delta = Vector3.new(root.Position.X - target.X, 0, root.Position.Z - target.Z)
+    if delta.Magnitude < 80 then return false, "ovo proximo; seguindo a pe" end
+    local landing = target + delta.Unit * 6 + Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2, 0)
+    local applied = pcall(function()
+        humanoid:Move(Vector3.zero, false)
+        root.CFrame = CFrame.new(landing) * root.CFrame.Rotation
+        root.AssemblyLinearVelocity = Vector3.zero
+    end)
+    if not applied then return false, "salto nao aplicado; seguindo a pe" end
+    local deadline = os.clock() + 1.25
+    repeat
+        game:GetService("RunService").Heartbeat:Wait()
+        if not allowed() then return false, "cancelado" end
+        if (root.Position - landing).Magnitude > 14 then return false, "posicao corrigida pelo jogo" end
+    until os.clock() >= deadline
+    return true, "salto local mantido; aproximando a pe"
+end
 
 -- Posicao do registro, com alternativa pelo modelo visual.
 local function collectionDestination(model, rec)
@@ -2125,7 +2155,7 @@ local function collectionDestination(model, rec)
     return part and part.Position or nil
 end
 
--- Ida e volta andando; sem teleporte.
+-- Salto opcional apenas na ida; volta sempre pelo controlador de caminhada.
 local function runCollection(uid, model, rec)
     collectorBusy = true
     collector.generation = collector.generation + 1
@@ -2406,6 +2436,18 @@ local function runCollection(uid, model, rec)
         local currentDestination=refreshTarget(true)
         local arrived,why=false,"Alvo indisponivel antes da aproximacao"
         if currentDestination then
+            if cfg.OUTBOUND_JUMP then
+                collectionMessage("Testando salto na ida...")
+                local _, jumpWhy = tryOutboundJump(root, humanoid, currentDestination, function()
+                    return active() and cfg.OUTBOUND_JUMP
+                end, readCarryState)
+                if not active() then return end
+                local carry = readCarryState()
+                if not carry or carry.IsCarrying then error("Estado de posse mudou durante o salto; ida interrompida", 0) end
+                collectionMessage(tostring(jumpWhy))
+                currentDestination = refreshTarget(true)
+                if not currentDestination then error("Alvo indisponivel apos o salto", 0) end
+            end
             collectionMessage("Indo diretamente ao ovo...")
             arrived,why=walkTo(currentDestination,false,refreshTarget)
         end
