@@ -68,6 +68,45 @@ end) end;
 local statusFirst, statusLast = source:find(statusNeedle, 1, true)
 assert(statusFirst and not source:find(statusNeedle, statusLast + 1, true), "Unexpected scheduler revision; instrumentation stopped")
 source = source:sub(1, statusFirst - 1) .. statusReplacement .. source:sub(statusLast + 1)
+local readinessNeedle = [[local function u(i)if i.ready then local P,n=pcall(i.ready);
+return P and n;]]
+local readinessReplacement = [[local function u(i)if i.ready then local P,n=pcall(i.ready);
+if i.name=="Steal" then pcall(function()
+    __diceTpTraceStatus("ready-result", "READY ok="..tostring(P).." result="..tostring(n), 5)
+end) end;
+return P and n;]]
+local readyFirst, readyLast = source:find(readinessNeedle, 1, true)
+assert(readyFirst and not source:find(readinessNeedle, readyLast+1, true), "Unexpected ready evaluator")
+source = source:sub(1, readyFirst-1) .. readinessReplacement .. source:sub(readyLast+1)
+local candidatesNeedle = [[function nP.ready()if S()<=0 then return nil;
+elseif(nP.full or 0)>os.clock()then return nil;
+end;
+local IP=YP()[1];]]
+local candidatesReplacement = [[function nP.ready()
+pcall(function() __diceTpTraceStatus("candidate-input", function()
+    local records = state[18]() or {}
+    local total, uidCount, positioned, eligible, skipped, states = 0, 0, 0, 0, 0, {}
+    for _, record in pairs(records) do if type(record)=="table" then
+        total=total+1
+        if type(record.Uid)=="string" then uidCount=uidCount+1 end
+        if typeof(record.BottomCFrame)=="CFrame" then positioned=positioned+1 end
+        if record.State=="Slot" or record.State=="Dropped" then eligible=eligible+1 end
+        if state[20].skip and state[20].skip[record.Uid] then skipped=skipped+1 end
+        local key=tostring(record.State);states[key]=(states[key]or 0)+1
+    end end
+    local parts={};for key,count in pairs(states)do parts[#parts+1]=key..":"..count end;table.sort(parts)
+    return string.format("INPUT records=%d stringUid=%d positioned=%d slotOrDropped=%d skipped=%d states=%s fullWait=%.1f note=%s",
+        total,uidCount,positioned,eligible,skipped,table.concat(parts,","),math.max(0,(nP.full or 0)-os.clock()),tostring(state[20].status))
+end,5) end)
+if S()<=0 then return nil;
+elseif(nP.full or 0)>os.clock()then return nil;
+end;
+local traceCandidates=YP()
+pcall(function() __diceTpTraceStatus("candidates", "CANDIDATES count="..tostring(#traceCandidates).." first="..tostring(traceCandidates[1] and traceCandidates[1].Uid),5) end)
+local IP=traceCandidates[1];]]
+local candidateFirst,candidateLast=source:find(candidatesNeedle,1,true)
+assert(candidateFirst and not source:find(candidatesNeedle,candidateLast+1,true),"Unexpected target selector")
+source=source:sub(1,candidateFirst-1)..candidatesReplacement..source:sub(candidateLast+1)
 local logger = [[
 local __diceTpLines = {}
 local __diceTpNextStatus = {}
@@ -82,6 +121,7 @@ local function __diceTpTraceStatus(key, message, interval)
     local now = os.clock()
     if now < (__diceTpNextStatus[key] or 0) then return end
     __diceTpNextStatus[key] = now + interval
+    if type(message)=="function" then message=message() end
     __diceTpTrace(message)
 end
 __diceTpTrace("Diagnostic loaded: 3=standard approach, 7=Teleport route, 13=Instant Steal V3. Logging is local.")
