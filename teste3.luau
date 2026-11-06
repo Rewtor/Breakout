@@ -1799,7 +1799,6 @@ local function runCollection(uid, model, rec)
     local tripReturned = false
     local deliveryConfirmed = false
     local deliveryConnection=nil
-    local carryConfirmed=false
     local interactionAttempted=false
     local character = player.Character
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -2188,7 +2187,6 @@ local function runCollection(uid, model, rec)
             if tostring(carried.Uid)~=tostring(uid) then
                 error("Ovo errado: alvo "..tostring(uid)..", carregado "..tostring(carried.Uid).."; automatico interrompido",0)
             end
-            carryConfirmed=true
             outcome="Ovo correto confirmado."
         end
         collectionMessage(outcome.." Voltando ao ponto de partida...")
@@ -2203,7 +2201,7 @@ local function runCollection(uid, model, rec)
         end
         if active() then
             collectionMessage(deliveryConfirmed and "Entrega confirmada pelo jogo."
-                or (returned and "Retorno concluido, mas entrega NAO confirmada. Automatico sera interrompido."
+                or (returned and "Retorno concluido; entrega nao confirmada."
                 or "Retorno interrompido: "..tostring(returnWhy)))
         end
     end)
@@ -2223,9 +2221,17 @@ local function runCollection(uid, model, rec)
     if humanoid and humanoid.Parent and root and root.Parent then humanoid:MoveTo(root.Position) end
     if not ok and alive then collectionMessage("Falha na caminhada: "..tostring(err)) end
     collector.humanoid=nil
+    -- Entrega sem mensagem nao encerra o farm se ja voltamos e estamos livres.
+    -- Nao inicia outra viagem enquanto ainda carrega um ovo ou a leitura falha.
+    local readyForNext=false
+    local finalCarry=nil
+    if collector.automatic and ok and tripReturned and active() then
+        finalCarry=readCarryState()
+        readyForNext=finalCarry~=nil and finalCarry.IsCarrying==false
+    end
     collectorBusy=false
     if collector.automatic and collector.enabled and generation==collector.generation
-        and ok and tripReturned and carryConfirmed and deliveryConfirmed then
+        and ok and tripReturned and readyForNext then
         collector.finished=false
         -- Reavalia imediatamente os ovos restantes, sem esperar UIDs novos.
         -- attempted preserva os UIDs ja tentados nesta sessao de farm.
@@ -2239,7 +2245,10 @@ local function runCollection(uid, model, rec)
         collector.pending=false
         if collector.automatic and collector.enabled then
             collector.enabled=false
-            collectionMessage(collectionStatus.Text.." Automatico desligado: retorno ou entrega sem confirmacao.")
+            local reason=finalCarry and finalCarry.IsCarrying
+                and "personagem ainda carrega um ovo."
+                or "retorno incompleto ou estado do personagem indisponivel."
+            collectionMessage(collectionStatus.Text.." Automatico desligado: "..reason)
         end
     end
     lastValidEggTime=os.clock()
