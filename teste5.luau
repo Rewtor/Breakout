@@ -101,6 +101,7 @@ local connections = {}
 local cached = {}
 local cacheState = {}
 local rows = {}
+local indexTheme = {}
 
 local dataVersion = 0
 local viewVersion = 0
@@ -366,8 +367,9 @@ local list = create("ScrollingFrame", body, {
     ScrollingDirection = Enum.ScrollingDirection.Y,
 })
 
-create("UIListLayout", list, {
-    Padding = UDim.new(0, 8),
+local eggGrid = create("UIGridLayout", list, {
+    CellSize = UDim2.fromOffset(180, 216),
+    CellPadding = UDim2.fromOffset(10, 10),
     SortOrder = Enum.SortOrder.LayoutOrder,
 })
 
@@ -375,6 +377,7 @@ local empty = text(list, {
     Text = "Aguardando ovos carregados...",
     Size = UDim2.new(1, -12, 0, 55),
 })
+empty.Parent = body
 
 local settings = create("ScrollingFrame", body, {
     BackgroundTransparency = 1,
@@ -470,10 +473,12 @@ local function layout()
     radarTab.Position, radarTab.Size = UDim2.fromOffset(14, 10), UDim2.new(0.4, -18, 0, 38)
     settingsButton.Position, settingsButton.Size = UDim2.new(0.4, 4, 0, 10), UDim2.new(0.6, -18, 0, 38)
     settingsButton.Text = "AJUSTES & FARM"
-    local active = ColorSequence.new(Color3.fromRGB(255, 222, 65), Color3.fromRGB(239, 144, 24))
-    local idle = ColorSequence.new(Color3.fromRGB(93, 118, 167), Color3.fromRGB(48, 66, 103))
+    local active = indexTheme.activeColor or ColorSequence.new(Color3.fromRGB(255, 222, 65), Color3.fromRGB(239, 144, 24))
+    local idle = indexTheme.idleColor or ColorSequence.new(Color3.fromRGB(93, 118, 167), Color3.fromRGB(48, 66, 103))
     radarTab:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and idle or active
     settingsButton:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and active or idle
+    radarTab.TextTransparency = uiMotion.settings and 0.3 or 0
+    settingsButton.TextTransparency = uiMotion.settings and 0 or 0.3
     mobileOptions.Visible = false
     for _, object in ipairs({sortButton, detailButton, pauseButton}) do
         object.Parent = body
@@ -486,6 +491,11 @@ local function layout()
     stat.Visible = not tight and not uiMotion.settings
     local top = (uiMotion.settings or tiny) and 58 or (tight and 101 or 143)
     viewport.Position, viewport.Size = UDim2.fromOffset(12, top), UDim2.new(1, -24, 1, -top - (tiny and 56 or 88))
+    local available = math.max(1, width - 44)
+    local columns = math.max(1, math.floor((available + 10) / ((indexTheme.tileWidth or 160) + 10)))
+    eggGrid.CellSize = UDim2.fromOffset(math.floor((available - (columns - 1) * 10) / columns), compact and 216 or 350)
+    empty.Position, empty.Size = UDim2.fromOffset(24, top + 20), UDim2.new(1, -48, 0, 60)
+    empty.Visible = not uiMotion.settings and #sorted == 0
     list.Position, list.Size = UDim2.new(), UDim2.fromScale(1, 1)
     settings.Position, settings.Size = UDim2.new(), UDim2.fromScale(1, 1)
     hopStatus.Position, hopStatus.Size = UDim2.new(0, 16, 1, -83), UDim2.new(1, -32, 0, 20)
@@ -949,6 +959,7 @@ render = function()
                 }),
             }
             rows[uid] = row
+            if indexTheme.apply then indexTheme.apply(frame, "card") end
         end
 
         if row.rank ~= index then
@@ -962,24 +973,28 @@ render = function()
             or row.compact ~= compact
             or row.mobile ~= mobile then
 
-            row.frame.Size = UDim2.new(1, -7, 0, mobile and 96 or 102)
-            row.frame.AutomaticSize = compact and Enum.AutomaticSize.None
-                or Enum.AutomaticSize.Y
+            row.frame.AutomaticSize = Enum.AutomaticSize.None
+            row.frame.ClipsDescendants = true
 
-            row.meta.Size = UDim2.new(1, -24, 0, mobile and 30 or 36)
-            row.details.Position = UDim2.fromOffset(12, mobile and 97 or 101)
-            row.details.TextSize = mobile and 12 or 11
-            row.value.TextSize = mobile and 14 or 15
+            row.meta.Position, row.meta.Size = UDim2.fromOffset(10, 173), UDim2.new(1, -20, 0, 34)
+            row.meta.TextSize = 11
+            row.details.Position = UDim2.fromOffset(10, 216)
+            row.details.Size = UDim2.new(1, -20, 0, 126)
+            row.details.AutomaticSize = Enum.AutomaticSize.None
+            row.details.TextSize = 10
+            row.value.TextSize = 14
 
             local hasIcon = type(data.Icon) == "string" and data.Icon ~= ""
             row.icon.Image = data.Icon or ""
             row.icon.Visible = hasIcon
 
-            local left = hasIcon and 66 or 12
-            row.title.Position = UDim2.fromOffset(left, 9)
-            row.title.Size = UDim2.new(1, -left - 12, 0, 24)
-            row.value.Position = UDim2.fromOffset(left, 35)
-            row.value.Size = UDim2.new(1, -left - 12, 0, 22)
+            row.icon.AnchorPoint = Vector2.new(0.5, 0)
+            row.icon.Position, row.icon.Size = UDim2.new(0.5, 0, 0, 12), UDim2.fromOffset(78, 78)
+            row.title.Position, row.title.Size = UDim2.fromOffset(10, 97), UDim2.new(1, -20, 0, 24)
+            row.title.TextSize = 14
+            row.value.Position, row.value.Size = UDim2.fromOffset(10, 126), UDim2.new(1, -20, 0, 40)
+            row.title.TextXAlignment, row.value.TextXAlignment = Enum.TextXAlignment.Center, Enum.TextXAlignment.Center
+            row.meta.TextXAlignment = Enum.TextXAlignment.Center
 
             row.title.Text = string.format("#%02d  %s", index, data.C)
             row.title.TextColor3 = rarityColors[data.Rar]
@@ -1042,6 +1057,7 @@ end)
 connect(detailButton.Activated, function()
     compact = not compact
     detailButton.Text = compact and "Detalhes: OFF" or "Detalhes: ON"
+    layout()
     render()
 end)
 
@@ -2631,6 +2647,193 @@ local function scan()
     end
 
     render()
+end
+
+-- Copia apenas propriedades visuais do Index real. Nao copia scripts,
+-- callbacks, textos, itens de inventario nem conexoes da interface original.
+do
+    local refs, source, dirty, sourceConnection = {}, nil, true, nil
+    local function findPanel()
+        local candidates = host:GetChildren()
+        local hud = host:FindFirstChild("HUD")
+        if hud then
+            for _, object in ipairs(hud:GetDescendants()) do
+                local name = object.Name:lower()
+                if object:IsA("GuiObject") and not object:IsA("GuiButton")
+                    and (name == "index" or name == "indexframe" or name == "indexpanel" or name == "indexmenu") then
+                    candidates[#candidates + 1] = object
+                end
+            end
+        end
+        for _, screen in ipairs(candidates) do
+            if screen ~= gui and screen.Name ~= "HUD" then
+                local named = string.find(string.lower(screen.Name), "index", 1, true) ~= nil
+                local descendants = screen:GetDescendants()
+                local heading
+                for _, object in ipairs(descendants) do
+                    if object:IsA("TextLabel") then
+                        local value = object.Text:gsub("<[^>]->", ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+                        if value == "index" or value == "pet index" or value == "egg index" or value == "índice" then
+                            heading = object; break
+                        end
+                    end
+                end
+                if named or heading then
+                    local panel = screen:IsA("GuiObject") and screen
+                        or screen:FindFirstChild("Frame") or screen:FindFirstChild("Main") or screen:FindFirstChild("Panel")
+                    if not panel and heading then
+                        local ancestor = heading.Parent
+                        while ancestor and ancestor ~= screen do
+                            if ancestor:IsA("Frame") or ancestor:IsA("ImageLabel") then panel = ancestor end
+                            ancestor = ancestor.Parent
+                        end
+                    end
+                    if not panel and screen:IsA("GuiObject") then panel = screen end
+                    if panel and panel:IsA("GuiObject") then return panel, heading end
+                end
+            end
+        end
+    end
+    local function labelOf(object)
+        if not object then return end
+        if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then return object end
+        return object:FindFirstChildWhichIsA("TextLabel", true)
+    end
+    local function copyFont(target, template)
+        if not template then return end
+        for _, property in ipairs({"FontFace", "TextColor3", "TextStrokeColor3", "TextStrokeTransparency"}) do
+            target[property] = template[property]
+        end
+    end
+    local function copySurface(target, template)
+        if not template then return end
+        target.BackgroundColor3, target.BackgroundTransparency = template.BackgroundColor3, template.BackgroundTransparency
+        target.BorderSizePixel, target.BorderColor3 = template.BorderSizePixel, template.BorderColor3
+        for _, class in ipairs({"UICorner", "UIStroke", "UIGradient"}) do
+            for _, child in ipairs(target:GetChildren()) do if child:IsA(class) then child:Destroy() end end
+            for _, child in ipairs(template:GetChildren()) do
+                if child:IsA(class) then
+                    local clone = child:Clone()
+                    if clone then clone.Parent = target end
+                end
+            end
+        end
+        local old = target:FindFirstChild("IndexSurfaceImage")
+        if old then old:Destroy() end
+        if template:IsA("ImageLabel") or template:IsA("ImageButton") then
+            create("ImageLabel", target, {
+                Name = "IndexSurfaceImage", BackgroundTransparency = 1,
+                Size = UDim2.fromScale(1, 1), ZIndex = 0,
+                Image = template.Image, ImageColor3 = template.ImageColor3,
+                ImageTransparency = template.ImageTransparency, ScaleType = template.ScaleType,
+                SliceCenter = template.SliceCenter, SliceScale = template.SliceScale,
+                ImageRectOffset = template.ImageRectOffset, ImageRectSize = template.ImageRectSize,
+            })
+        end
+    end
+    local function ensureGradient(object)
+        return object:FindFirstChildOfClass("UIGradient") or create("UIGradient", object, {})
+    end
+    indexTheme.apply = function(target, kind)
+        if kind == "card" then
+            copySurface(target, refs.card)
+            for _, child in ipairs(target:GetDescendants()) do
+                if child:IsA("TextLabel") then copyFont(child, refs.cardLabel or refs.label) end
+            end
+        end
+    end
+    local function apply(panel, heading)
+        local all = panel:GetDescendants()
+        refs = {label = heading or labelOf(panel), header = panel:FindFirstChild("Header", true)}
+        for _, object in ipairs(all) do
+            local name = object.Name:lower()
+            if object:IsA("ScrollingFrame") and not refs.scroll then refs.scroll = object end
+            if object:IsA("TextBox") and not refs.field then refs.field = object end
+            if object:IsA("GuiButton") then
+                if name:find("close", 1, true) or name == "exit" then refs.close = object
+                elseif name:find("tab", 1, true) or name == "pets" or name == "eggs" then refs.button = refs.button or object end
+            end
+            if not refs.card and object:IsA("GuiObject")
+                and (name == "template" or name == "itemtemplate" or name == "pettemplate" or name == "eggtemplate")
+                and (object:FindFirstChildWhichIsA("ImageLabel", true) or object:FindFirstChildWhichIsA("ViewportFrame", true)) then
+                refs.card = object
+            end
+        end
+        if not refs.card and refs.scroll then
+            for _, object in ipairs(refs.scroll:GetChildren()) do
+                if object:IsA("GuiObject") and labelOf(object)
+                    and (object:FindFirstChildWhichIsA("ImageLabel", true) or object:FindFirstChildWhichIsA("ViewportFrame", true)) then
+                    refs.card = object; break
+                end
+            end
+        end
+        refs.cardLabel = labelOf(refs.card)
+        if not refs.button then
+            for _, object in ipairs(all) do
+                if object:IsA("GuiButton") and object ~= refs.close
+                    and (not refs.scroll or not object:IsDescendantOf(refs.scroll)) then
+                    refs.button = object; break
+                end
+            end
+        end
+        local nativeGrid = refs.scroll and refs.scroll:FindFirstChildOfClass("UIGridLayout")
+        if nativeGrid and nativeGrid.CellSize.X.Offset > 0 then indexTheme.tileWidth = math.clamp(nativeGrid.CellSize.X.Offset, 120, 240) end
+        copySurface(main, panel)
+        if refs.header and refs.header:IsA("GuiObject") then copySurface(header, refs.header) end
+        copyFont(title, heading or (refs.header and labelOf(refs.header)) or refs.label)
+        for _, object in ipairs(main:GetDescendants()) do
+            if object:IsA("GuiButton") and object ~= shade then
+                copySurface(object, object == closeButton and refs.close or refs.button)
+                if object:IsA("TextButton") then copyFont(object, labelOf(refs.button) or refs.label) end
+                ensureGradient(object)
+            elseif object:IsA("TextBox") then
+                copySurface(object, refs.field)
+                copyFont(object, refs.field or refs.label)
+            elseif object:IsA("TextLabel") and object ~= title then copyFont(object, refs.label) end
+        end
+        for _, object in ipairs({list, settings}) do
+            if refs.scroll then
+                object.ScrollBarImageColor3 = refs.scroll.ScrollBarImageColor3
+                object.ScrollBarThickness = refs.scroll.ScrollBarThickness
+            end
+        end
+        local gradient = refs.button and refs.button:FindFirstChildOfClass("UIGradient")
+        indexTheme.activeColor = gradient and gradient.Color or nil
+        indexTheme.idleColor = indexTheme.activeColor
+        for _, row in pairs(rows) do indexTheme.apply(row.frame, "card") end
+        indexTheme.sourceName = panel:GetFullName()
+        gui:SetAttribute("IndexStyleSource", indexTheme.sourceName)
+        if hopStatus.Text == "Abra o Index uma vez para carregar o visual." then
+            hopStatus.Text = "Pronto para buscar servidor."
+        end
+        viewVersion = viewVersion + 1
+        layout()
+    end
+    connect(host.DescendantAdded, function(object)
+        if not source and not object:IsDescendantOf(gui) then dirty = true end
+    end)
+    connect(gui.Destroying, function() if sourceConnection then sourceConnection:Disconnect() end end)
+    task.spawn(function()
+        task.wait(0.5)
+        while alive do
+            if dirty or not source or not source:IsDescendantOf(host) then
+                dirty = false
+                local ok, panel, heading = pcall(findPanel)
+                if ok and panel then
+                    if source ~= panel then
+                        if sourceConnection then sourceConnection:Disconnect() end
+                        source = panel
+                        sourceConnection = panel.DescendantAdded:Connect(function() dirty = true end)
+                    end
+                    local applied, err = pcall(apply, panel, heading)
+                    if not applied then warn("[Dice Radar] Falha ao copiar estilo do Index: " .. tostring(err)); dirty = true end
+                elseif not source and hopStatus.Text == "Pronto para buscar servidor." then
+                    hopStatus.Text = "Abra o Index uma vez para carregar o visual."
+                end
+            end
+            task.wait(5)
+        end
+    end)
 end
 
 body.Visible = true
