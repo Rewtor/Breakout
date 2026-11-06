@@ -539,14 +539,12 @@ do
         Name = "FinderLauncherLayer", Size = UDim2.fromScale(1, 1),
         BackgroundTransparency = 1, Active = false,
     })
-    local fallback = button(overlay, "FINDER", UDim2.new(1, -112, 0.5, -32), UDim2.fromOffset(100, 64))
-    local nativeButton, sourceButton, eggButton
+    local fallback = button(overlay, "FINDER", UDim2.new(0, 12, 0.5, -96), UDim2.fromOffset(100, 64))
+    local nativeButton, sourceButton, indexButton
     local watchers = {}
-    local purple = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(132, 74, 255)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 104, 206)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(146, 66, 255)),
-    })
+    local finderColors = ColorSequence.new(Color3.fromRGB(255, 107, 2), Color3.fromRGB(255, 238, 1))
+    fallback:FindFirstChildOfClass("UIGradient").Color = finderColors
+    fallback:FindFirstChildOfClass("UIGradient").Rotation = -90
     local function openFinder()
         minimized = not minimized
         body.Visible = not minimized
@@ -558,7 +556,7 @@ do
         for _, connection in ipairs(watchers) do connection:Disconnect() end
         table.clear(watchers)
         if nativeButton then nativeButton:Destroy() end
-        nativeButton, sourceButton, eggButton = nil, nil, nil
+        nativeButton, sourceButton, indexButton = nil, nil, nil
     end
     local function visible(object)
         while object and object ~= host do
@@ -570,17 +568,17 @@ do
     end
     refreshFinder = function()
         local nativeReady = nativeButton and sourceButton and sourceButton:IsDescendantOf(host)
-            and eggButton and eggButton:IsDescendantOf(host)
+            and indexButton and indexButton:IsDescendantOf(host)
         fallback.Visible = not nativeReady
         if not nativeReady then return end
-        local size = eggButton.AbsoluteSize
-        nativeButton.Visible = size.X > 0 and size.Y > 0 and visible(eggButton) and visible(sourceButton)
+        local size = sourceButton.AbsoluteSize
+        nativeButton.Visible = size.X > 0 and size.Y > 0 and visible(indexButton) and visible(sourceButton)
         if not nativeButton.Visible then return end
-        local center = eggButton.AbsolutePosition + size / 2
-        local petsCenter = sourceButton.AbsolutePosition + sourceButton.AbsoluteSize / 2
-        local spacing = petsCenter - center
-        -- Espelha o espacamento Pets/Eggs para inserir Finder acima de Eggs.
-        if spacing.Magnitude < 1 then spacing = Vector2.new(0, size.Y + 8) end
+        local center = sourceButton.AbsolutePosition + size / 2
+        local indexCenter = indexButton.AbsolutePosition + indexButton.AbsoluteSize / 2
+        -- Mesma posicao do teste4: acima do Shop, usando o intervalo Shop/Index.
+        local spacing = Vector2.new(0, indexCenter.Y - center.Y)
+        if math.abs(spacing.Y) < 1 then spacing = Vector2.new(0, size.Y + 8) end
         local target = center - spacing - overlay.AbsolutePosition
         nativeButton.Position = UDim2.fromOffset(target.X, target.Y)
         nativeButton.Size = UDim2.fromOffset(size.X, size.Y)
@@ -588,22 +586,23 @@ do
     local function attach()
         local hud = host:FindFirstChild("HUD")
         local gameHud = hud and hud:FindFirstChild("GameHUD")
-        local column = gameHud and gameHud:FindFirstChild("RightButtons")
-        local pets = column and column:FindFirstChild("PetsButton")
-        local eggs = column and column:FindFirstChild("EggsButton")
-        if pets == sourceButton and eggs == eggButton and nativeButton then
+        local column = gameHud and gameHud:FindFirstChild("LeftControls")
+        local shop = column and column:FindFirstChild("ShopBTN")
+        local index = column and column:FindFirstChild("IndexBTN")
+        if shop == sourceButton and index == indexButton and nativeButton then
             refreshFinder(); return
         end
         disconnectNative()
-        if not pets or not pets:IsA("GuiButton") or not eggs or not eggs:IsA("GuiObject") then
+        if not shop or not shop:IsA("GuiButton") or not index or not index:IsA("GuiObject") then
             refreshFinder(); return
         end
-        local ok, clone = pcall(function() return pets:Clone() end)
+        local ok, clone = pcall(function() return shop:Clone() end)
         if not ok or not clone then refreshFinder(); return end
         for _, object in ipairs(clone:GetDescendants()) do
             if object:IsA("LuaSourceContainer") then object:Destroy() end
         end
-        for _, name in ipairs({"Notification", "ReadyNotification", "NightImage", "NightText", "ConsoleButton", "Badge"}) do
+        for key in pairs(clone:GetAttributes()) do clone:SetAttribute(key, nil) end
+        for _, name in ipairs({"Notification", "ReadyNotification", "NightImage", "NightText", "ConsoleButton", "GamepadGlyph", "Badge"}) do
             local object = clone:FindFirstChild(name)
             if object then object:Destroy() end
         end
@@ -611,7 +610,7 @@ do
             if object:IsA("GuiObject") then object.Active = false end
             if object:IsA("UIScale") then object.Scale = 1 end
         end
-        local label = clone:FindFirstChild("Label", true) or clone:FindFirstChild("TextLabel", true)
+        local label = clone:FindFirstChild("txt", true) or clone:FindFirstChild("Label", true) or clone:FindFirstChild("TextLabel", true)
         if label and (label:IsA("TextLabel") or label:IsA("TextButton")) then
             label.Text = "Finder"
         elseif clone:IsA("TextButton") then
@@ -623,38 +622,49 @@ do
         end
         local gradient = clone:FindFirstChildOfClass("UIGradient")
             or create("UIGradient", clone, {})
-        gradient.Color, gradient.Rotation = purple, -115
+        gradient.Color, gradient.Rotation = finderColors, -90
         local stroke = clone:FindFirstChild("UIStroke")
-        if stroke and stroke:IsA("UIStroke") then stroke.Color = Color3.fromRGB(44, 10, 80) end
+        if stroke and stroke:IsA("UIStroke") then stroke.Color = Color3.fromRGB(60, 24, 0) end
         local light = clone:FindFirstChild("UIStrokeClr")
-        if light and light:IsA("UIStroke") then light.Color = Color3.fromRGB(226, 178, 255) end
+        if light and light:IsA("UIStroke") then light.Color = Color3.fromRGB(255, 222, 55) end
+        local right = gameHud:FindFirstChild("RightButtons")
+        local eggs = right and right:FindFirstChild("EggsButton")
+        local eggIcon = eggs and eggs:FindFirstChild("ImageLabel")
+        local hasEggIcon = false
         for _, name in ipairs({"ImageLabel", "Icon"}) do
             local icon = clone:FindFirstChild(name)
-            if icon and icon:IsA("GuiObject") then icon.Visible = false end
+            if icon and icon:IsA("ImageLabel") and eggIcon and eggIcon:IsA("ImageLabel") then
+                icon.Image, icon.Visible = eggIcon.Image, true
+                hasEggIcon = true
+            elseif icon and icon:IsA("GuiObject") then
+                icon.Visible = false
+            end
         end
         -- Lupa desenhada com UI nativa; dispensa assets externos.
         local lens = create("Frame", clone, {BackgroundTransparency = 1,
+            Visible = not hasEggIcon,
             ZIndex = clone.ZIndex + 5,
             Position = UDim2.fromScale(0.28, 0.12), Size = UDim2.fromScale(0.36, 0.36)})
         create("UIAspectRatioConstraint", lens, {AspectRatio = 1})
         create("UICorner", lens, {CornerRadius = UDim.new(1, 0)})
         create("UIStroke", lens, {Color = Color3.new(1, 1, 1), Thickness = 3})
         local handle = create("Frame", clone, {BackgroundColor3 = Color3.new(1, 1, 1),
+            Visible = not hasEggIcon,
             ZIndex = clone.ZIndex + 5,
             BorderSizePixel = 0, Rotation = 45, Position = UDim2.fromScale(0.59, 0.48),
             Size = UDim2.fromScale(0.23, 0.065)})
         create("UICorner", handle, {CornerRadius = UDim.new(1, 0)})
         clone.Name, clone.AnchorPoint, clone.Visible = "DiceFinderButton", Vector2.new(0.5, 0.5), false
         clone.Parent = overlay
-        nativeButton, sourceButton, eggButton = clone, pets, eggs
+        nativeButton, sourceButton, indexButton = clone, shop, index
         watchers[#watchers + 1] = clone.Activated:Connect(openFinder)
         local function watch(object, property)
             watchers[#watchers + 1] = object:GetPropertyChangedSignal(property):Connect(refreshFinder)
         end
-        for _, object in ipairs({pets, eggs, overlay}) do
+        for _, object in ipairs({shop, index, overlay}) do
             watch(object, "AbsolutePosition"); watch(object, "AbsoluteSize")
         end
-        local ancestor = eggs
+        local ancestor = index
         while ancestor and ancestor ~= host do
             if ancestor:IsA("GuiObject") then watch(ancestor, "Visible") end
             if ancestor:IsA("ScreenGui") then watch(ancestor, "Enabled") end
