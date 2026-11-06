@@ -2052,9 +2052,14 @@ local collectionStatus = text(settings, {
     LayoutOrder = 100,
 })
 local function collectionMessage(message)
-    if alive then collectionStatus.Text = message end
+    if alive then
+        local note = collector.lastJumpMessage
+        if note and not message:find(note, 1, true) then message = note .. "\n" .. message end
+        collectionStatus.Text = message
+    end
 end
 local updateFarmToggle=nil
+local updateJumpToggle=nil
 local function setFarmEnabled(value)
     value=value==true
     local changed=cfg.FARM~=value
@@ -2094,6 +2099,7 @@ local function startCollection(automatic)
         return
     end
     collector.automatic = automatic
+    collector.lastJumpMessage = nil
     setFarmEnabled(automatic)
     collector.mode = "walk"
     collector.enabled = true
@@ -2116,7 +2122,7 @@ updateFarmToggle=addToggle("Farm continuo (filtro do webhook)",cfg.FARM,function
     end
 end)
 addButton("DESLIGAR coleta / cancelar viagem", stopCollection)
-addToggle("Salto experimental na ida", cfg.OUTBOUND_JUMP, function(value)
+updateJumpToggle=addToggle("Salto experimental na ida", cfg.OUTBOUND_JUMP, function(value)
     cfg.OUTBOUND_JUMP = value
 end)
 
@@ -2130,12 +2136,12 @@ local function tryOutboundJump(root, humanoid, target, allowed, readCarry)
     local delta = Vector3.new(root.Position.X - target.X, 0, root.Position.Z - target.Z)
     if delta.Magnitude < 80 then return false, "ovo proximo; seguindo a pe" end
     local landing = target + delta.Unit * 6 + Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2, 0)
-    local applied = pcall(function()
+    local applied, failure = pcall(function()
         humanoid:Move(Vector3.zero, false)
         root.CFrame = CFrame.new(landing) * root.CFrame.Rotation
         root.AssemblyLinearVelocity = Vector3.zero
     end)
-    if not applied then return false, "salto nao aplicado; seguindo a pe" end
+    if not applied then return false, "salto nao aplicado: " .. tostring(failure) end
     local deadline = os.clock() + 1.25
     repeat
         game:GetService("RunService").Heartbeat:Wait()
@@ -2438,10 +2444,18 @@ local function runCollection(uid, model, rec)
         if currentDestination then
             if cfg.OUTBOUND_JUMP then
                 collectionMessage("Testando salto na ida...")
-                local _, jumpWhy = tryOutboundJump(root, humanoid, currentDestination, function()
+                local jumped, jumpWhy = tryOutboundJump(root, humanoid, currentDestination, function()
                     return active() and cfg.OUTBOUND_JUMP
                 end, readCarryState)
                 if not active() then return end
+                if not jumped and jumpWhy == "posicao corrigida pelo jogo" then
+                    cfg.OUTBOUND_JUMP = false
+                    if updateJumpToggle then updateJumpToggle(false) end
+                    collector.lastJumpMessage = "Salto corrigido pelo jogo; opcao desligada. Seguindo a pe."
+                else
+                    collector.lastJumpMessage = "Salto: " .. tostring(jumpWhy)
+                end
+                print("[Dice Radar] " .. collector.lastJumpMessage)
                 local carry = readCarryState()
                 if not carry or carry.IsCarrying then error("Estado de posse mudou durante o salto; ida interrompida", 0) end
                 collectionMessage(tostring(jumpWhy))
