@@ -52,14 +52,37 @@ local replacement = [[        local callback = definition.module.bind(sourceTabl
 local first, last = source:find(needle, 1, true)
 assert(first and not source:find(needle, last + 1, true), "Unexpected teste4 revision; instrumentation stopped")
 source = source:sub(1, first - 1) .. replacement .. source:sub(last + 1)
+-- Observe scheduling before a route is selected. A normal night/wall wait
+-- must not look like a failed loader merely because no callback began.
+local statusNeedle = [[local nP=k({name="Steal",mover=true,gap=0.5,pri=2,hold=true});
+nP.on=function()local eP=state[25];]]
+local statusReplacement = [[local nP=k({name="Steal",mover=true,gap=0.5,pri=2,hold=true});
+nP.on=function()local eP=state[25];
+if eP.steal then pcall(function()
+    local night = state[22]("Cycle", "IsNightPhase", workspace:GetServerTimeNow())
+    local sealed = state[22]("Wall", "IsSealed")
+    __diceTpTraceStatus("scheduler", string.format("STATUS auto=true move=%s night=%s wallSealed=%s fieldSeconds=%s task=%s",
+        tostring(eP.moveTo), tostring(night), tostring(sealed), tostring(S()), tostring(state[4] and state[4].name)), 5)
+end) end;
+]]
+local statusFirst, statusLast = source:find(statusNeedle, 1, true)
+assert(statusFirst and not source:find(statusNeedle, statusLast + 1, true), "Unexpected scheduler revision; instrumentation stopped")
+source = source:sub(1, statusFirst - 1) .. statusReplacement .. source:sub(statusLast + 1)
 local logger = [[
 local __diceTpLines = {}
+local __diceTpNextStatus = {}
 local function __diceTpTrace(message)
     local line = string.format("[T4 Teleport %.3f] %s", os.clock(), message)
     print(line)
     __diceTpLines[#__diceTpLines+1] = line
     if #__diceTpLines > 300 then table.remove(__diceTpLines, 1) end
     if writefile then pcall(writefile, "DiceRadar_TeleportTrace.txt", table.concat(__diceTpLines, "\n")) end
+end
+local function __diceTpTraceStatus(key, message, interval)
+    local now = os.clock()
+    if now < (__diceTpNextStatus[key] or 0) then return end
+    __diceTpNextStatus[key] = now + interval
+    __diceTpTrace(message)
 end
 __diceTpTrace("Diagnostic loaded: 3=standard approach, 7=Teleport route, 13=Instant Steal V3. Logging is local.")
 ]]
