@@ -205,6 +205,26 @@ local function button(parent, title, position, size)
     })
 
     if hudFont then object.FontFace = hudFont end
+    -- O gradiente fica no fundo do TextButton; a legenda independente conserva
+    -- branco e contorno preto, em vez de receber a mesma cor do fundo.
+    object.TextTransparency, object.TextStrokeTransparency = 1, 1
+    local caption = text(object, {
+        Name = "Caption", Text = title, Size = UDim2.fromScale(1, 1),
+        TextSize = object.TextSize, TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        TextColor3 = Color3.new(1, 1, 1),
+        TextStrokeColor3 = Color3.new(0, 0, 0), TextStrokeTransparency = 0,
+        ZIndex = object.ZIndex + 1,
+    })
+    caption.FontFace = object.FontFace
+    local function syncCaption()
+        caption.Text, caption.FontFace, caption.TextSize = object.Text, object.FontFace, object.TextSize
+        caption.ZIndex = object.ZIndex + 1
+    end
+    for _, property in ipairs({"Text", "FontFace", "TextSize", "ZIndex"}) do
+        connect(object:GetPropertyChangedSignal(property), syncCaption)
+    end
     object.AutoButtonColor = false
     local scale = create("UIScale", object, {Scale = 1})
     local motion
@@ -521,10 +541,9 @@ local function layout()
     radarTab.Text, settingsButton.Text = "Ovos", "Ajustes"
     radarTab.TextSize, settingsButton.TextSize = 18, 18
     local active = ColorSequence.new(Color3.fromRGB(75, 229, 252), Color3.fromRGB(23, 137, 217))
-    local idle = ColorSequence.new(Color3.fromRGB(159, 125, 26), Color3.fromRGB(80, 59, 3))
+    local idle = ColorSequence.new(Color3.fromRGB(224, 178, 42), Color3.fromRGB(144, 102, 13))
     radarTab:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and idle or active
     settingsButton:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and active or idle
-    radarTab.TextTransparency, settingsButton.TextTransparency = uiMotion.settings and 0.2 or 0, uiMotion.settings and 0 or 0.2
     -- Ordenacao, detalhes e pausa ficam nos Ajustes, sem ocupar a grade de ovos.
     mobileOptions.Visible = true
     mobileOptions.Size = UDim2.new(1, -8, 0, 72)
