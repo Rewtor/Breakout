@@ -94,7 +94,7 @@ end)
 local alive = true
 local paused = false
 local mobile = UIS.TouchEnabled
-local compact = mobile
+local compact = true
 local minimized = true
 
 local connections = {}
@@ -241,6 +241,13 @@ end
 local function exact(value)
     local n = finite(value)
     return n and string.format("%.2f", n) or "pendente"
+end
+
+local function displayName(value)
+    local name = tostring(value or "Ovo não identificado")
+    if name:lower():match("^workspace%.") then name = name:match("([^%.]+)$") or name end
+    name = name:gsub("_", " "):gsub("(%l)(%u)", "%1 %2"):gsub("(%u)(%u%l)", "%1 %2")
+    return name
 end
 
 local function isTarget(data)
@@ -429,7 +436,7 @@ local viewport = create("Frame", body, {
     Name = "ContentViewport", BackgroundTransparency = 1, ClipsDescendants = true,
 })
 list.Parent, settings.Parent = viewport, viewport
-local sidePanel = create("Frame", body, {BackgroundColor3 = Color3.fromRGB(36, 39, 43), BorderSizePixel = 0})
+local sidePanel = create("Frame", body, {BackgroundColor3 = Color3.fromRGB(36, 39, 43), BorderSizePixel = 0, ZIndex = 1})
 create("UIStroke", sidePanel, {Color = Color3.new(0, 0, 0), Thickness = 2})
 local preview = create("Frame", body, {BackgroundColor3 = Color3.fromRGB(65, 65, 65), BorderSizePixel = 0, ClipsDescendants = true})
 create("UIGradient", preview, {Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(140, 140, 140)), Rotation = 90})
@@ -486,7 +493,7 @@ local function layout()
     local view = gui.AbsoluteSize
     if view.X <= 0 or view.Y <= 0 then return end
     local wasMobile = mobile
-    mobile = view.X < 480
+    mobile = view.X < 480 or view.Y < 350
     if wasMobile ~= mobile then viewVersion = viewVersion + 1 end
     local width = math.max(1, math.min(760, view.X - 24))
     local height = math.max(1, math.min(450, view.Y - 24))
@@ -509,11 +516,13 @@ local function layout()
     sidePanel.Visible = not mobile
     sidePanel.Position, sidePanel.Size = UDim2.fromOffset(8, 8), UDim2.new(0, 72, 1, -54)
     radarTab.Parent, settingsButton.Parent = body, body
+    radarTab.ZIndex, settingsButton.ZIndex = 2, 2
     radarTab.Position, radarTab.Size = UDim2.fromOffset(12, 14), UDim2.fromOffset(64, 36)
     settingsButton.Position, settingsButton.Size = UDim2.fromOffset(12, 58), UDim2.fromOffset(64, 40)
     settingsButton.Text = "Ajustes\n& Farm"
     for i, object in ipairs({sortButton, detailButton, pauseButton}) do
         object.Parent, object.Visible = body, not uiMotion.settings
+        object.ZIndex = 2
         object.Position, object.Size, object.TextSize = UDim2.fromOffset(12, 108 + (i - 1) * 42), UDim2.fromOffset(64, 34), 10
     end
     radarTab:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(Color3.fromRGB(105, 237, 42), Color3.fromRGB(28, 157, 17))
@@ -538,7 +547,15 @@ local function layout()
     eggGrid.CellSize = UDim2.fromOffset(math.floor((contentWidth - (columns - 1) * 6 - 6) / columns), compact and 114 or 260)
     preview.Visible = not mobile and not uiMotion.settings
     preview.Position, preview.Size = UDim2.new(1, -166, 0, 8), UDim2.new(0, 154, 1, -120)
-    previewMeta.Visible = height - headerHeight - 120 >= 240
+    local previewHeight = height - headerHeight - 120
+    local iconHeight = math.clamp(previewHeight - 118, 40, 110)
+    previewIcon.Size = UDim2.new(0.8, 0, 0, iconHeight)
+    previewTitle.Position, previewTitle.Size = UDim2.fromOffset(6, iconHeight + 16), UDim2.new(1, -12, 0, 36)
+    previewTitle.TextSize, previewTitle.TextTruncate = 13, Enum.TextTruncate.AtEnd
+    previewValue.Position, previewValue.Size = UDim2.fromOffset(6, iconHeight + 55), UDim2.new(1, -12, 0, 21)
+    previewMeta.Position, previewMeta.Size = UDim2.fromOffset(6, iconHeight + 80), UDim2.new(1, -12, 0, 30)
+    previewMeta.TextSize, previewMeta.TextTruncate = 9, Enum.TextTruncate.AtEnd
+    previewMeta.Visible = true
     stat.Visible = true
     stat.Position, stat.Size = UDim2.new(0, 8, 1, -36), UDim2.new(1, mobile and -16 or -182, 0, 28)
     hopStatus.Visible = uiMotion.settings
@@ -650,10 +667,10 @@ do
     refreshFinder = function()
         local nativeReady = nativeButton and sourceButton and sourceButton:IsDescendantOf(host)
             and indexButton and indexButton:IsDescendantOf(host)
-        fallback.Visible = not nativeReady
+        fallback.Visible = minimized and not nativeReady
         if not nativeReady then return end
         local size = sourceButton.AbsoluteSize
-        nativeButton.Visible = size.X > 0 and size.Y > 0 and visible(indexButton) and visible(sourceButton)
+        nativeButton.Visible = minimized and size.X > 0 and size.Y > 0 and visible(indexButton) and visible(sourceButton)
         if not nativeButton.Visible then return end
         local center = sourceButton.AbsolutePosition + size / 2
         local indexCenter = indexButton.AbsolutePosition + indexButton.AbsoluteSize / 2
@@ -757,7 +774,7 @@ do
     task.spawn(function()
         while alive do
             local ok = pcall(attach)
-            if not ok then disconnectNative(); fallback.Visible = true end
+            if not ok then disconnectNative(); fallback.Visible = minimized end
             task.wait(3)
         end
     end)
@@ -1058,23 +1075,16 @@ render = function()
                 or Color3.fromRGB(255, 192, 100)
 
             row.meta.Text = exact(data.S).."×  •  Área "..tostring(data.A)
-            if not mobile then
-                row.meta.Text=row.meta.Text.."\n"..(data.Availability or "Disponibilidade não informada")
-            end
 
             row.details.Visible = not compact
 
             -- Não formata detalhes escondidos.
             if not compact then
                 row.details.Text = string.format(
-                    "Tamanho: %s×\nBase: $%s/s • multiplicador: %s×\nRenda estimada: $%s/s\nOrigem: %s\nUID: %s\n%s\n%s\n%s\n ",
-                    exact(data.S), exact(data.Base), exact(data.ScaleMult),
-                    data.Ready and exact(data.R) or "pendente",
-                    data.Source or data.C, uid,
-                    data.MutationNote or "Mutação não informada",
-                    isTarget(data) and "ALVO • atende aos filtros"
-                        or "Fora dos filtros / dados pendentes",
-                    data.Reason or ""
+                    "Tamanho: %s×\nBase: $%s/s\nMultiplicador: %s×\nRenda: $%s/s\n%s",
+                    exact(data.S), short(data.Base), exact(data.ScaleMult),
+                    data.Ready and short(data.R) or "pendente",
+                    isTarget(data) and "ALVO" or "Fora do filtro"
                 )
             end
 
@@ -1446,7 +1456,7 @@ local function buildCard(uid, model, rec, attrs, visual)
         base=finite(rec.ItemData.MoneyPerSecond or rec.ItemData.Income)
     end
 
-    card.C = tostring(display)
+    card.C = displayName(asset and asset.DisplayName or display)
     card.Source = tostring(rawDisplay)
     card.S, card.CS = scale, scale
     card.P = string.format("%.1fx", scale)
