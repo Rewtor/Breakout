@@ -1,7 +1,7 @@
 -- =========================================================
--- DICE RADAR V18 LITE | HOP POR PAGINA
+-- DICE RADAR V19 | RADAR OTIMIZADO + FARM
 -- Painel mobile + ranking + webhook + server hop
--- Sem ESP, coleta automatica ou atualizacao por frame.
+-- Ida, coleta e retorno; destino da ida fixado na coordenada do ovo.
 -- =========================================================
 
 local Players = game:GetService("Players")
@@ -24,8 +24,8 @@ local requestFn =
     or HttpPost
 
 local SCAN_INTERVAL = 1.5
-local GEOMETRY_TTL = 60
 local CONFIG_FILE = "DiceRadar_Config.json"
+local DEFAULT_POSITION = Vector3.new(519.82, 71.85, -364.44)
 
 local function finite(value)
     local n = tonumber(value)
@@ -45,6 +45,7 @@ local cfg = {
     I = 0,
     S = 0,
     WH = false,
+    FARM = false,
     AH = false,
     AHT = 60,
     PC = 1,
@@ -71,13 +72,13 @@ cfg.S = math.max(0, finite(cfg.S) or 0)
 cfg.AHT = math.max(5, finite(cfg.AHT) or 60)
 cfg.PC = tonumber(cfg.PC) == 2 and 2 or 1
 cfg.WH = cfg.WH == true
+cfg.FARM = cfg.FARM == true
 cfg.AH = cfg.AH == true
 
 -- Encerra a versao anterior que usa o mesmo nome.
 local function removePrevious(parent)
     for _, name in ipairs({
         "DiceRadarGUI",
-        "HalloweenReadOnlyRadarV4",
     }) do
         local previous = parent:FindFirstChild(name)
         if previous then previous:Destroy() end
@@ -98,7 +99,6 @@ local minimized = true
 local connections = {}
 local cached = {}
 local cacheState = {}
-local knownSources = {}
 local rows = {}
 
 local dataVersion = 0
@@ -149,7 +149,7 @@ local function text(parent, properties)
     local defaults = {
         BackgroundTransparency = 1,
         TextColor3 = Color3.fromRGB(229, 233, 243),
-        Font = Enum.Font.Gotham,
+        Font = Enum.Font.FredokaOne,
         TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Top,
@@ -169,15 +169,26 @@ local function button(parent, title, position, size)
         Text = title,
         Position = position,
         Size = size,
-        BackgroundColor3 = Color3.fromRGB(48, 58, 76),
+        BackgroundColor3 = Color3.new(1, 1, 1),
         TextColor3 = Color3.new(1, 1, 1),
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.FredokaOne,
+        TextStrokeColor3 = Color3.fromRGB(21, 12, 48),
+        TextStrokeTransparency = 0.25,
         TextSize = 12,
         BorderSizePixel = 0,
     })
 
     create("UICorner", object, {
-        CornerRadius = UDim.new(0, 6),
+        CornerRadius = UDim.new(0, 10),
+    })
+
+    create("UIGradient", object, {
+        Color = ColorSequence.new(Color3.fromRGB(158, 96, 255), Color3.fromRGB(88, 46, 180)),
+        Rotation = 90,
+    })
+    create("UIStroke", object, {
+        Color = Color3.fromRGB(34, 16, 67), Thickness = 2,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     })
 
     return object
@@ -214,6 +225,8 @@ end
 local render
 local doServerHop
 local cancelHop
+local collectorBusy = false
+local stopCollection
 
 local isHopping = false
 local hopGeneration = 0
@@ -231,6 +244,7 @@ local gui = create("ScreenGui", host, {
 })
 
 connect(gui.Destroying, function()
+    if stopCollection then stopCollection(true) end
     alive = false
     hopGeneration = hopGeneration + 1
 
@@ -243,26 +257,34 @@ end)
 local main = create("Frame", gui, {
     Size = UDim2.fromOffset(430, 500),
     Position = UDim2.fromOffset(10, 10),
-    BackgroundColor3 = Color3.fromRGB(18, 23, 32),
+    BackgroundColor3 = Color3.fromRGB(28, 20, 47),
     BorderSizePixel = 0,
     Active = true,
 })
 
-create("UICorner", main, {CornerRadius = UDim.new(0, 10)})
+create("UICorner", main, {CornerRadius = UDim.new(0, 16)})
 create("UIStroke", main, {
-    Color = Color3.fromRGB(255, 156, 70),
-    Thickness = 1.5,
+    Color = Color3.fromRGB(164, 112, 244),
+    Thickness = 3,
 })
 
 local header = create("Frame", main, {
     Size = UDim2.new(1, -106, 0, 50),
-    BackgroundTransparency = 1,
+    BackgroundColor3 = Color3.fromRGB(100, 57, 170),
+    BorderSizePixel = 0,
     Active = true,
+})
+create("UICorner", header, {CornerRadius = UDim.new(0, 13)})
+create("UIGradient", header, {
+    Color = ColorSequence.new(Color3.fromRGB(201, 121, 255), Color3.fromRGB(96, 54, 180)),
+    Rotation = 12,
 })
 
 local title = text(header, {
-    Text = "DICE / RADAR",
-    Font = Enum.Font.GothamBold,
+    Text = "EGG FINDER",
+    Font = Enum.Font.FredokaOne,
+    TextStrokeColor3 = Color3.fromRGB(37, 16, 64),
+    TextStrokeTransparency = 0,
     TextSize = 16,
     Position = UDim2.fromOffset(14, 14),
     Size = UDim2.new(1, -14, 1, -14),
@@ -349,13 +371,14 @@ local hopButton = button(body, "Trocar servidor", UDim2.new(), UDim2.new())
 local cancelButton = button(body, "Cancelar", UDim2.new(), UDim2.new())
 
 local footer = text(body, {
-    Text = "Atualização a cada 1,5 s • sem ESP\nRenda e peso estimados; mutações dependem dos dados disponíveis.",
+    Text = "Encontre ovos, ajuste seus filtros e acompanhe o farm.\nRenda e tamanho estimados pelos dados disponíveis.",
     TextSize = 11,
     TextColor3 = Color3.fromRGB(170, 181, 199),
 })
 
 local expandedSize = main.Size
 local headerHeight = 50
+local refreshFinder
 
 local function refreshHopButton()
     setText(hopButton,
@@ -410,11 +433,12 @@ local function layout()
     height = math.max(1, height)
 
     expandedSize = UDim2.fromOffset(width, height)
+    main.Visible = not minimized
     main.Size = minimized and UDim2.fromOffset(width, headerHeight)
         or expandedSize
 
     header.Size = UDim2.new(1, mobile and -106 or -90, 0, headerHeight)
-    title.Text = mobile and "DICE / RADAR" or "DICE / RADAR + SERVER HOP"
+    title.Text = mobile and "EGG FINDER" or "EGG FINDER  /  RADAR"
     title.TextSize = mobile and 16 or 17
 
     minimizeButton.Size = UDim2.fromOffset(mobile and 44 or 30, mobile and 44 or 28)
@@ -484,6 +508,7 @@ local function layout()
         or (mobile and "Ajustes" or "Configurações")
 
     refreshHopButton()
+    if refreshFinder then refreshFinder() end
     clampPosition()
     if render then render() end
 end
@@ -506,6 +531,146 @@ end)
 connect(closeButton.Activated, function()
     gui:Destroy()
 end)
+
+-- O launcher herda a aparencia do HUD, mas vive na nossa GUI: nao altera
+-- o layout nem as conexoes dos botoes originais do jogo.
+do
+    local overlay = create("Frame", gui, {
+        Name = "FinderLauncherLayer", Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1, Active = false,
+    })
+    local fallback = button(overlay, "FINDER", UDim2.new(1, -112, 0.5, -32), UDim2.fromOffset(100, 64))
+    local nativeButton, sourceButton, eggButton
+    local watchers = {}
+    local purple = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(132, 74, 255)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 104, 206)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(146, 66, 255)),
+    })
+    local function openFinder()
+        minimized = not minimized
+        body.Visible = not minimized
+        minimizeButton.Text = minimized and "+" or "—"
+        layout()
+    end
+    connect(fallback.Activated, openFinder)
+    local function disconnectNative()
+        for _, connection in ipairs(watchers) do connection:Disconnect() end
+        table.clear(watchers)
+        if nativeButton then nativeButton:Destroy() end
+        nativeButton, sourceButton, eggButton = nil, nil, nil
+    end
+    local function visible(object)
+        while object and object ~= host do
+            if object:IsA("GuiObject") and not object.Visible then return false end
+            if object:IsA("ScreenGui") and not object.Enabled then return false end
+            object = object.Parent
+        end
+        return object == host
+    end
+    refreshFinder = function()
+        local nativeReady = nativeButton and sourceButton and sourceButton:IsDescendantOf(host)
+            and eggButton and eggButton:IsDescendantOf(host)
+        fallback.Visible = not nativeReady
+        if not nativeReady then return end
+        local size = eggButton.AbsoluteSize
+        nativeButton.Visible = size.X > 0 and size.Y > 0 and visible(eggButton) and visible(sourceButton)
+        if not nativeButton.Visible then return end
+        local center = eggButton.AbsolutePosition + size / 2
+        local petsCenter = sourceButton.AbsolutePosition + sourceButton.AbsoluteSize / 2
+        local spacing = petsCenter - center
+        -- Espelha o espacamento Pets/Eggs para inserir Finder acima de Eggs.
+        if spacing.Magnitude < 1 then spacing = Vector2.new(0, size.Y + 8) end
+        local target = center - spacing - overlay.AbsolutePosition
+        nativeButton.Position = UDim2.fromOffset(target.X, target.Y)
+        nativeButton.Size = UDim2.fromOffset(size.X, size.Y)
+    end
+    local function attach()
+        local hud = host:FindFirstChild("HUD")
+        local gameHud = hud and hud:FindFirstChild("GameHUD")
+        local column = gameHud and gameHud:FindFirstChild("RightButtons")
+        local pets = column and column:FindFirstChild("PetsButton")
+        local eggs = column and column:FindFirstChild("EggsButton")
+        if pets == sourceButton and eggs == eggButton and nativeButton then
+            refreshFinder(); return
+        end
+        disconnectNative()
+        if not pets or not pets:IsA("GuiButton") or not eggs or not eggs:IsA("GuiObject") then
+            refreshFinder(); return
+        end
+        local ok, clone = pcall(function() return pets:Clone() end)
+        if not ok or not clone then refreshFinder(); return end
+        for _, object in ipairs(clone:GetDescendants()) do
+            if object:IsA("LuaSourceContainer") then object:Destroy() end
+        end
+        for _, name in ipairs({"Notification", "ReadyNotification", "NightImage", "NightText", "ConsoleButton", "Badge"}) do
+            local object = clone:FindFirstChild(name)
+            if object then object:Destroy() end
+        end
+        for _, object in ipairs(clone:GetDescendants()) do
+            if object:IsA("GuiObject") then object.Active = false end
+            if object:IsA("UIScale") then object.Scale = 1 end
+        end
+        local label = clone:FindFirstChild("Label", true) or clone:FindFirstChild("TextLabel", true)
+        if label and (label:IsA("TextLabel") or label:IsA("TextButton")) then
+            label.Text = "Finder"
+        elseif clone:IsA("TextButton") then
+            clone.Text = "Finder"
+        else
+            label = text(clone, {Text = "Finder", TextScaled = true,
+                Size = UDim2.fromScale(1, 0.28), Position = UDim2.fromScale(0, 0.7),
+                TextXAlignment = Enum.TextXAlignment.Center, TextStrokeTransparency = 0})
+        end
+        local gradient = clone:FindFirstChildOfClass("UIGradient")
+            or create("UIGradient", clone, {})
+        gradient.Color, gradient.Rotation = purple, -115
+        local stroke = clone:FindFirstChild("UIStroke")
+        if stroke and stroke:IsA("UIStroke") then stroke.Color = Color3.fromRGB(44, 10, 80) end
+        local light = clone:FindFirstChild("UIStrokeClr")
+        if light and light:IsA("UIStroke") then light.Color = Color3.fromRGB(226, 178, 255) end
+        for _, name in ipairs({"ImageLabel", "Icon"}) do
+            local icon = clone:FindFirstChild(name)
+            if icon and icon:IsA("GuiObject") then icon.Visible = false end
+        end
+        -- Lupa desenhada com UI nativa; dispensa assets externos.
+        local lens = create("Frame", clone, {BackgroundTransparency = 1,
+            ZIndex = clone.ZIndex + 5,
+            Position = UDim2.fromScale(0.28, 0.12), Size = UDim2.fromScale(0.36, 0.36)})
+        create("UIAspectRatioConstraint", lens, {AspectRatio = 1})
+        create("UICorner", lens, {CornerRadius = UDim.new(1, 0)})
+        create("UIStroke", lens, {Color = Color3.new(1, 1, 1), Thickness = 3})
+        local handle = create("Frame", clone, {BackgroundColor3 = Color3.new(1, 1, 1),
+            ZIndex = clone.ZIndex + 5,
+            BorderSizePixel = 0, Rotation = 45, Position = UDim2.fromScale(0.59, 0.48),
+            Size = UDim2.fromScale(0.23, 0.065)})
+        create("UICorner", handle, {CornerRadius = UDim.new(1, 0)})
+        clone.Name, clone.AnchorPoint, clone.Visible = "DiceFinderButton", Vector2.new(0.5, 0.5), false
+        clone.Parent = overlay
+        nativeButton, sourceButton, eggButton = clone, pets, eggs
+        watchers[#watchers + 1] = clone.Activated:Connect(openFinder)
+        local function watch(object, property)
+            watchers[#watchers + 1] = object:GetPropertyChangedSignal(property):Connect(refreshFinder)
+        end
+        for _, object in ipairs({pets, eggs, overlay}) do
+            watch(object, "AbsolutePosition"); watch(object, "AbsoluteSize")
+        end
+        local ancestor = eggs
+        while ancestor and ancestor ~= host do
+            if ancestor:IsA("GuiObject") then watch(ancestor, "Visible") end
+            if ancestor:IsA("ScreenGui") then watch(ancestor, "Enabled") end
+            ancestor = ancestor.Parent
+        end
+        refreshFinder()
+    end
+    connect(gui.Destroying, disconnectNative)
+    task.spawn(function()
+        while alive do
+            local ok = pcall(attach)
+            if not ok then disconnectNative(); fallback.Visible = true end
+            task.wait(3)
+        end
+    end)
+end
 
 local dragInput, dragStart, startPosition
 
@@ -557,10 +722,10 @@ local function addBox(label, value, callback)
         Size = UDim2.new(1, 0, 0, 46),
         Text = tostring(value),
         ClearTextOnFocus = false,
-        BackgroundColor3 = Color3.fromRGB(31, 39, 52),
+        BackgroundColor3 = Color3.fromRGB(43, 31, 65),
         BorderSizePixel = 0,
         TextColor3 = Color3.new(1, 1, 1),
-        Font = Enum.Font.Gotham,
+        Font = Enum.Font.FredokaOne,
         TextSize = 15,
     })
 
@@ -589,8 +754,10 @@ local function addToggle(label, value, callback)
 
     local function paint()
         btn.Text = value and "ATIVADO" or "DESATIVADO"
-        btn.BackgroundColor3 = value and Color3.fromRGB(73, 103, 51)
-            or Color3.fromRGB(48, 58, 76)
+        btn.BackgroundColor3 = Color3.new(1, 1, 1)
+        btn:FindFirstChildOfClass("UIGradient").Color = value
+            and ColorSequence.new(Color3.fromRGB(140, 232, 82), Color3.fromRGB(55, 143, 39))
+            or ColorSequence.new(Color3.fromRGB(119, 99, 150), Color3.fromRGB(66, 48, 93))
     end
 
     connect(btn.Activated, function()
@@ -600,6 +767,10 @@ local function addToggle(label, value, callback)
     end)
 
     paint()
+    return function(newValue)
+        value=newValue==true
+        paint()
+    end
 end
 
 local function addButton(label, callback)
@@ -688,8 +859,8 @@ local function rebuildSorted()
         local av, bv = aa.R, bb.R
 
         if sortMode == 2 then
-            av = aa.EconomicScale or aa.S
-            bv = bb.EconomicScale or bb.S
+            av = aa.S
+            bv = bb.S
         elseif sortMode == 3 then
             av = rarityRanks[aa.Rar] or 0
             bv = rarityRanks[bb.Rar] or 0
@@ -725,11 +896,15 @@ render = function()
 
         if not row then
             local frame = create("Frame", list, {
-                BackgroundColor3 = Color3.fromRGB(31, 39, 52),
+                BackgroundColor3 = Color3.fromRGB(43, 31, 65),
                 BorderSizePixel = 0,
             })
 
             create("UICorner", frame, {CornerRadius = UDim.new(0, 8)})
+            create("UIStroke", frame, {
+                Color = Color3.fromRGB(88, 64, 127), Thickness = 1.5,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            })
 
             row = {
                 frame = frame,
@@ -740,13 +915,13 @@ render = function()
                     ScaleType = Enum.ScaleType.Fit,
                 }),
                 title = text(frame, {
-                    Font = Enum.Font.GothamBold,
+                    Font = Enum.Font.FredokaOne,
                     TextSize = 15,
                     TextWrapped = false,
                     TextTruncate = Enum.TextTruncate.AtEnd,
                 }),
                 value = text(frame, {
-                    Font = Enum.Font.GothamBold,
+                    Font = Enum.Font.FredokaOne,
                     TextSize = 15,
                 }),
                 meta = text(frame, {
@@ -762,13 +937,17 @@ render = function()
             rows[uid] = row
         end
 
+        if row.rank ~= index then
+            row.frame.LayoutOrder = index
+            row.title.Text = string.format("#%02d  %s", index, data.C)
+            row.rank = index
+        end
+
         if row.data ~= data
-            or row.rank ~= index
             or row.view ~= viewVersion
             or row.compact ~= compact
             or row.mobile ~= mobile then
 
-            row.frame.LayoutOrder = index
             row.frame.Size = UDim2.new(1, -7, 0, mobile and 96 or 102)
             row.frame.AutomaticSize = compact and Enum.AutomaticSize.None
                 or Enum.AutomaticSize.Y
@@ -800,19 +979,9 @@ render = function()
                 and Color3.fromRGB(155, 245, 105)
                 or Color3.fromRGB(255, 192, 100)
 
-            if mobile then
-                row.meta.Text = (
-                    data.Weight and (exact(data.Weight) .. " kg")
-                    or (exact(data.EconomicScale or data.S) .. "×")
-                ) .. "  •  Área " .. tostring(data.A)
-            else
-                row.meta.Text = string.format(
-                    "%s %s× • Área %s\nPeso estimado: %s kg • %s",
-                    data.EconomicScale and "Escala corrigida" or "Escala visual",
-                    exact(data.EconomicScale or data.S),
-                    tostring(data.A), exact(data.Weight),
-                    data.Availability or "Disponibilidade não informada"
-                )
+            row.meta.Text = exact(data.S).."×  •  Área "..tostring(data.A)
+            if not mobile then
+                row.meta.Text=row.meta.Text.."\n"..(data.Availability or "Disponibilidade não informada")
             end
 
             row.details.Visible = not compact
@@ -820,11 +989,9 @@ render = function()
             -- Não formata detalhes escondidos.
             if not compact then
                 row.details.Text = string.format(
-                    "Visual: %s× → corrigida: %s×\nBase: $%s/s • multiplicador: %s×\nRenda estimada: $%s/s\nTemplate: %s\nOrigem: %s\nUID: %s\n%s\n%s\n%s\n ",
-                    exact(data.S), exact(data.EconomicScale),
-                    exact(data.Base), exact(data.ScaleMult),
+                    "Tamanho: %s×\nBase: $%s/s • multiplicador: %s×\nRenda estimada: $%s/s\nOrigem: %s\nUID: %s\n%s\n%s\n%s\n ",
+                    exact(data.S), exact(data.Base), exact(data.ScaleMult),
                     data.Ready and exact(data.R) or "pendente",
-                    data.Template or "não informado",
                     data.Source or data.C, uid,
                     data.MutationNote or "Mutação não informada",
                     isTarget(data) and "ALVO • atende aos filtros"
@@ -870,6 +1037,7 @@ connect(pauseButton.Activated, function()
     lastValidEggTime = os.clock()
 
     if paused then
+        if stopCollection then stopCollection() end
         if isHopping and cancelHop then cancelHop() end
         stat.Text = "PAUSADO • última leitura mantida"
         hopStatus.Text = "Auto hop suspenso enquanto o radar está pausado."
@@ -877,7 +1045,7 @@ connect(pauseButton.Activated, function()
 end)
 
 -- =========================================================
--- MODULOS E CACHE DE TEMPLATES
+-- MODULOS DO JOGO
 -- =========================================================
 
 local modules = {}
@@ -889,7 +1057,6 @@ local modulePaths = {
     AssetItems = {"Shared", "Util", "AssetItems"},
     AssetEarnings = {"Shared", "Util", "AssetEarnings"},
     Mutations = {"Shared", "Modules", "Mutations"},
-    HalloweenPets = {"Data", "HalloweenPets"},
     Assets = {"Data", "Assets"},
 }
 
@@ -915,149 +1082,6 @@ local function loadModules()
         end
     end
 end
-
-local geometryCache = {}
-
-local function templateGeometry(name)
-    if type(name) ~= "string" or name == "" then
-        return nil, "Template não informado"
-    end
-
-    local now = os.clock()
-    local previous = geometryCache[name]
-
-    if previous
-        and now < previous.expires
-        and previous.model.Parent == previous.parent
-        and previous.model.Name == name then
-        return previous
-    end
-
-    local assets = RS:FindFirstChild("Assets")
-    local models = assets and assets:FindFirstChild("Models")
-    local eggs = models and models:FindFirstChild("Eggs")
-
-    if not eggs then return nil, "Templates não carregados" end
-
-    local found
-    for _, child in ipairs(eggs:GetChildren()) do
-        if child.Name == name and child:IsA("Model") then
-            if found then return nil, "Template ambíguo: " .. name end
-            found = child
-        end
-    end
-
-    if not found then return nil, "Template ausente: " .. name end
-
-    local size = found:GetExtentsSize()
-    local result = {
-        model = found,
-        parent = eggs,
-        scale = found:GetScale(),
-        dimension = math.max(size.X, size.Y, size.Z),
-        expires = now + GEOMETRY_TTL,
-    }
-
-    geometryCache[name] = result
-    return result
-end
-
-local sourceCache = {}
-local sourceCacheSpecs
-local sourceCacheExpiry = 0
-
-local function resolveSource(source)
-    local specs = modules.HalloweenPets and modules.HalloweenPets.Specs
-    if type(specs) ~= "table" then
-        return nil, nil, "HalloweenPets.Specs indisponível"
-    end
-
-    if type(source) ~= "string" or source == "" then
-        return nil, nil, "Origem não informada"
-    end
-
-    local now = os.clock()
-    if sourceCacheSpecs ~= specs or now >= sourceCacheExpiry then
-        table.clear(sourceCache)
-        sourceCacheSpecs = specs
-        sourceCacheExpiry = now + 30
-    end
-
-    local hit = sourceCache[source]
-    if hit then return hit.id, hit.key end
-
-    local direct = specs[source]
-    if type(direct) == "table" then
-        local id = direct.Id or source
-        sourceCache[source] = {id = id, key = source}
-        return id, source
-    end
-
-    local id, key
-    for candidate, spec in pairs(specs) do
-        if type(spec) == "table"
-            and (spec.EggSource == source or spec.EggModel == source) then
-            local candidateId = spec.Id or candidate
-            if id and id ~= candidateId then
-                return nil, nil, "Origem ambígua"
-            end
-            id, key = candidateId, candidate
-        end
-    end
-
-    if id then
-        sourceCache[source] = {id = id, key = key}
-        return id, key
-    end
-
-    return nil, nil, "Origem não encontrada em Specs"
-end
-
-local aliases = {
-    ["Rotshroom"] = "Toadstool",
-    ["Rotshroom Egg"] = "Toadstool",
-    ["Dread Wolf"] = "Werewolf",
-    ["Halloween Royal Mimic Egg"] = "Mimic Chest",
-    ["Royal Mimic Egg"] = "Mimic Chest",
-    ["Royal Mimic"] = "Mimic Chest",
-    ["Frankenstein Kong Egg"] = "Abomination Kong",
-    ["Quilted Imp Egg"] = "Patchwork Imp",
-    ["SpiritKnight"] = "Spirit Knight",
-}
-
--- Compatibilidade para registros sem modelo Halloween.
-local halloweenFallback = {
-    ["Hexed Pumpkin"]={150000000,"Cosmic"},
-    ["Graveyard Brute"]={75000000,"Secret"},
-    ["Toadstool"]={1600000,"Mythic"},
-    ["Haunted Scorpio"]={30000000,"Cosmic"},
-    ["Crowshade"]={4500000,"Mythic"},
-    ["Shelltide Voyager"]={1600000000,"Eternal"},
-    ["Halloween Gigantopithecus"]={1500000000,"Eternal"},
-    ["Werewolf"]={1300000000,"Secret"},
-    ["Mimic Chest"]={600000,"Legendary"},
-    ["Zombified Halloween Glyptodon"]={800000000,"Secret"},
-    ["Zombified Halloween Dunkleosteus"]={4000000000,"Eternal"},
-    ["BloodBloom"]={450000000,"Secret"},
-    ["Hooded Gerbil"]={300000,"Legendary"},
-    ["Ghost Reaper"]={300000000,"Eternal"},
-    ["Abomination Kong"]={3500000000,"Eternal"},
-    ["Patchwork Imp"]={20000000,"Cosmic"},
-    ["Voidseer Pumpkin"]={14000000000,"Divine"},
-    ["Halloween Terrorbird"]={160000,"Mythic"},
-    ["Halloween Dunkleosteus"]={450000000,"Secret"},
-    ["Zombified Halloween Terrorbird"]={1100000000,"Secret"},
-    ["Zombified Halloween Gigantopithecus"]={6000000000,"Eternal"},
-    ["Candlefang"]={225000,"Mythic"},
-    ["Jesterpop"]={40000,"Legendary"},
-    ["Whiskers"]={2000,"Epic"},
-    ["Zombified Halloween Sabertooth"]={14000000000,"Divine"},
-    ["Halloween Sabertooth"]={7500000000,"Divine"},
-    ["Halloween Glyptodon"]={35000,"Legendary"},
-    ["Spirit Knight"]={3000000,"Cosmic"},
-    ["Zombified Halloween Megatherium"]={1400000000,"Secret"},
-    ["Halloween Megatherium"]={6000000,"Cosmic"},
-}
 
 local function getAsset(name)
     if not name then return nil end
@@ -1180,7 +1204,7 @@ local recordFields = {
     "AssetCategory","Category","ItemName",
     "PreparedSourceName","DisplayName",
     "AreaId","Area","Zone","Scale","AssetScale",
-    "Mutations","Mutation","Rarity",
+    "Mutations","Mutation","BaseMutation","Rarity",
     "Income","EarningRate","MoneyPerSecond","ItemData","Uid",
 }
 
@@ -1230,26 +1254,41 @@ local function sameCard(aa, bb)
     return true
 end
 
-local function readInputs(model, rec)
+-- Campos realmente usados pelo calculo; tabelas continuam observadas em profundidade.
+local attributeFields = {
+    "Mutations","Mutation","BaseMutation","PreparedSourceName","Zone",
+    "Category","AssetCategory","ItemName","DisplayName","Scale","AssetScale",
+    "Rarity","RarityTier","Tier","AreaId","Area","Income","EarningRate",
+}
+
+local function readInputs(model, rec, state)
     local attrs = model and model:GetAttributes() or {}
-    local visual
-
-    if model and model:IsA("Model") then
-        visual = finite(model:GetScale())
+    local visual = model and model:IsA("Model") and finite(model:GetScale()) or nil
+    local previous = state.inputs
+    if not previous then
+        previous = {values = {}, token = 0}
+        state.inputs = previous
     end
-
-    local recValues = {}
-    for _, field in ipairs(recordFields) do
-        recValues[field] = rec[field]
+    local name = model and model.Name or ""
+    local changed = previous.visual ~= visual or previous.name ~= name
+        or previous.revision ~= moduleRevision
+    previous.visual, previous.name, previous.revision = visual, name, moduleRevision
+    local index, valid = 0, true
+    local function compare(value)
+        index = index + 1
+        if type(value) == "table" then
+            value = signature(value)
+            if value == nil then valid = false end
+        end
+        if previous.values[index] ~= value then
+            changed = true
+            previous.values[index] = value
+        end
     end
-
-    return attrs, visual, signature({
-        attrs = attrs,
-        rec = recValues,
-        visual = visual,
-        modelName = model and model.Name or "",
-        revision = moduleRevision,
-    })
+    for _, field in ipairs(attributeFields) do compare(attrs[field]) end
+    for _, field in ipairs(recordFields) do compare(rec[field]) end
+    if changed then previous.token = previous.token + 1 end
+    return attrs, visual, valid and previous.token or nil
 end
 
 -- =========================================================
@@ -1258,6 +1297,13 @@ end
 
 local function buildCard(uid, model, rec, attrs, visual)
     local mutation = attrs.Mutations or attrs.Mutation or rec.Mutations or rec.Mutation
+    if mutation == nil or mutation == false or mutation == ""
+        or (type(mutation) == "table" and next(mutation) == nil) then
+        local base = attrs.BaseMutation or rec.BaseMutation
+        if base and base ~= "" and base ~= "None" and base ~= "Normal" then
+            mutation = {base}
+        end
+    end
     local mutationMult, mutationNote = mutationInfo(mutation)
 
     local card = {
@@ -1272,88 +1318,7 @@ local function buildCard(uid, model, rec, attrs, visual)
         MutationNote = mutationNote,
     }
 
-    -- Halloween: não passa pelo calculo generico.
-    if model and attrs.HalloweenEggUid ~= nil then
-        local source = attrs.PreparedSourceName
-
-        if type(source) == "string" and source ~= "" then
-            knownSources[uid] = source
-        else
-            source = knownSources[uid]
-        end
-
-        local id, key, reason = resolveSource(source)
-        local directory = modules.Assets and modules.Assets.Directory
-        local asset = type(directory) == "table" and id and directory[id]
-
-        if type(asset) ~= "table" and type(directory) == "table"
-            and key and type(directory[key]) == "table" then
-            id, asset = key, directory[key]
-        end
-
-        card.C = tostring(id or source or "Ovo não identificado")
-        card.Source = tostring(source or "ausente")
-        card.A = tostring(attrs.Zone or "?")
-        card.P = exact(card.S) .. "x"
-        card.Rar = "Desconhecida"
-
-        if type(asset) ~= "table" then
-            card.Reason = reason or "Assets.Directory indisponível"
-            return card
-        end
-
-        card.Base = finite(asset.EarningRate)
-        card.Rar = rarityName(asset.Rarity) or "Desconhecida"
-        card.Icon = iconOf(asset)
-
-        local egg = type(asset.Egg) == "table" and asset.Egg or {}
-        card.Template = egg.ModelName
-
-        local geometry, geometryError = templateGeometry(card.Template)
-        if not geometry then
-            card.Reason = geometryError
-            return card
-        end
-
-        local zone = finite(attrs.Zone)
-        if zone ~= 1 and zone ~= 2 and zone ~= 3 then
-            card.Reason = "Conversão validada apenas nas zonas 1–3"
-            return card
-        end
-
-        if not finite(geometry.scale)
-            or math.abs(geometry.scale - 1) > 0.000001 then
-            card.Reason = "Template com escala diferente de 1"
-            return card
-        end
-
-        if not visual or visual <= 0 or geometry.dimension <= 0 then
-            card.Reason = "Escala ou geometria inválida"
-            return card
-        end
-
-        card.EconomicScale = finite(visual * geometry.dimension / (4.5 + zone))
-
-        local income, mult = incomeFor(card.Base, card.EconomicScale)
-        local adjusted = income and finite(income * mutationMult)
-
-        if adjusted then
-            card.R = math.floor(adjusted + 0.5)
-            card.ScaleMult = mult
-            card.Ready = true
-        else
-            card.Reason = "Renda pendente"
-        end
-
-        local baseWeight = positive(egg.WeightKg, nil)
-        if baseWeight and card.EconomicScale then
-            card.Weight = finite(baseWeight * card.EconomicScale ^ 3)
-        end
-
-        return card
-    end
-
-    -- Demais ovos: conserva os aliases e as fontes da V17.
+    -- Calcula renda e tamanho a partir dos registros e assets atuais.
     local rawCategory = attrs.Category or attrs.AssetCategory or attrs.ItemName
         or rec.AssetCategory or rec.Category or rec.ItemName or "Egg"
 
@@ -1366,15 +1331,11 @@ local function buildCard(uid, model, rec, attrs, visual)
         rawDisplay = model.Name
     end
 
-    local category = aliases[rawCategory] or rawCategory
-    local display = aliases[rawDisplay] or rawDisplay
-    local modelName = model and (aliases[model.Name] or model.Name)
+    local category = rawCategory
+    local display = rawDisplay
+    local modelName = model and model.Name
 
     local asset = getAsset(display) or getAsset(category) or getAsset(modelName)
-    local fallback = halloweenFallback[display]
-        or halloweenFallback[category]
-        or (modelName and halloweenFallback[modelName])
-
     local scale = finite(attrs.Scale or attrs.AssetScale or rec.Scale or rec.AssetScale)
 
     if not scale then
@@ -1389,33 +1350,20 @@ local function buildCard(uid, model, rec, attrs, visual)
     scale = positive(scale, 1)
 
     local base
-    if fallback then
-        base = fallback[1]
-    else
-        local specs = modules.HalloweenPets and modules.HalloweenPets.Specs
-        for _, name in ipairs({display, category, modelName}) do
-            if not base or base == 0 then
-                local spec = type(specs) == "table" and specs[name]
-                if type(spec) == "table" then base = finite(spec.EarningRate) end
-
-                if not base or base == 0 then
-                    local candidate = getAsset(name)
-                    if candidate then
-                        base = finite(candidate.EarningRate
-                            or (type(candidate.Egg) == "table" and candidate.Egg.EarningRate))
-                    end
-                end
+    for _,name in ipairs({display,category,modelName}) do
+        if not base or base==0 then
+            local candidate=getAsset(name)
+            if candidate then
+                base=finite(candidate.EarningRate
+                    or (type(candidate.Egg)=="table" and candidate.Egg.EarningRate))
             end
         end
-
-        if not base or base == 0 then
-            base = finite(attrs.Income or attrs.EarningRate
-                or rec.Income or rec.EarningRate or rec.MoneyPerSecond)
-        end
-
-        if (not base or base == 0) and type(rec.ItemData) == "table" then
-            base = finite(rec.ItemData.MoneyPerSecond or rec.ItemData.Income)
-        end
+    end
+    if not base or base==0 then
+        base=finite(attrs.Income or attrs.EarningRate or rec.Income or rec.EarningRate or rec.MoneyPerSecond)
+    end
+    if (not base or base==0) and type(rec.ItemData)=="table" then
+        base=finite(rec.ItemData.MoneyPerSecond or rec.ItemData.Income)
     end
 
     card.C = tostring(display)
@@ -1424,8 +1372,7 @@ local function buildCard(uid, model, rec, attrs, visual)
     card.P = string.format("%.1fx", scale)
     card.Base = base
     card.Icon = iconOf(asset)
-    card.Rar = fallback and fallback[2]
-        or inferRarity(display, attrs, rec, asset, modelName)
+    card.Rar = inferRarity(display, attrs, rec, asset, modelName)
 
     local income, mult = incomeFor(base, scale)
     local adjusted = income and finite(income * mutationMult)
@@ -1437,7 +1384,7 @@ local function buildCard(uid, model, rec, attrs, visual)
     end
 
     local earnings = modules.AssetEarnings
-    if not fallback and earnings
+    if earnings
         and type(earnings.MutationOnlyRatePerSecond) == "function" then
         local function nativeRate(name)
             local ok, result = pcall(earnings.MutationOnlyRatePerSecond, {
@@ -1472,7 +1419,8 @@ local function availabilityFor(model, state)
 
     local now = os.clock()
     if not prompt and now >= (state.nextPromptTry or 0) then
-        prompt = model:FindFirstChild("StealPrompt", true)
+        prompt = model:FindFirstChild("CarryAreaEgg", true)
+            or model:FindFirstChild("StealPrompt", true)
         if prompt and not prompt:IsA("ProximityPrompt") then prompt = nil end
         state.nextPromptTry = now + 5
     end
@@ -1616,6 +1564,10 @@ end
 
 doServerHop = function()
     if isHopping or not alive then return end
+    if collectorBusy then
+        hopStatus.Text = "Aguarde a coleta ou cancele-a nos ajustes."
+        return
+    end
 
     hopGeneration = hopGeneration + 1
     local generation = hopGeneration
@@ -1745,7 +1697,6 @@ end)
 connect(cancelButton.Activated, cancelHop)
 
 
-
 -- =========================================================
 -- DESCOBERTA E VARREDURA
 -- =========================================================
@@ -1778,8 +1729,6 @@ local function refreshFolders()
         end
     end
 
-    local dimension = Workspace:FindFirstChild("HalloweenDimension")
-    add(dimension and dimension:FindFirstChild("WorldEggs"))
 end
 
 local emptyRecord = {}
@@ -1795,7 +1744,6 @@ local function collectSources()
                 local uid = child:GetAttribute("UID")
                     or child:GetAttribute("Uid")
                     or child:GetAttribute("EggUid")
-                    or child:GetAttribute("HalloweenEggUid")
                     or child:GetAttribute("Id")
 
                 if not uid and child.Name ~= "Model" and child.Name ~= "Part" then
@@ -1821,7 +1769,7 @@ local function collectSources()
                 if type(source) == "table" then
                     for key, rec in pairs(source) do
                         if type(rec) == "table" then
-                            local uid = tostring(rec.Uid or rec.HalloweenEggUid or rec.Id or key)
+                            local uid = tostring(rec.Uid or rec.Id or key)
                             records[uid] = rec
                             all[uid] = true
                         end
@@ -1832,12 +1780,8 @@ local function collectSources()
     end
 
     -- O estado atualizado tem prioridade sobre valores em cache ou modelos antigos.
-    -- Claimed foi confirmado no diagnostico de ovos coletados do mapa normal.
     for uid, rec in pairs(records) do
-        local model = models[uid]
-        local halloween = rec.HalloweenEggUid ~= nil
-            or (model and model:GetAttribute("HalloweenEggUid") ~= nil)
-        if not halloween and rec.State == "Claimed" then
+        if rec.State == "Claimed" then
             all[uid] = nil
             models[uid] = nil
             -- Invalida imediatamente a renda usada por notificacoes ainda nao enviadas.
@@ -1846,7 +1790,6 @@ local function collectSources()
                 dataVersion = dataVersion + 1
             end
             cacheState[uid] = nil
-            knownSources[uid] = nil
             notified[uid] = nil
             local row = rows[uid]
             if row then
@@ -1860,8 +1803,12 @@ local function collectSources()
 end
 
 local function updateEgg(uid, model, rec, now)
-    local attrs, visual, inputSignature = readInputs(model, rec)
     local state = cacheState[uid]
+    if not state or state.model ~= model then
+        state = {model = model}
+        cacheState[uid] = state
+    end
+    local attrs, visual, inputSignature = readInputs(model, rec, state)
 
     local recalculate = not state
         or state.model ~= model
@@ -1870,11 +1817,6 @@ local function updateEgg(uid, model, rec, now)
         or now >= state.expires
         or not cached[uid]
         or not cached[uid].Ready
-
-    if not state or state.model ~= model then
-        state = {model = model}
-        cacheState[uid] = state
-    end
 
     local card = cached[uid]
 
@@ -1885,6 +1827,7 @@ local function updateEgg(uid, model, rec, now)
         -- Revisões distribuídas para não expirar todos os ovos juntos.
         state.expires = now + 25 + math.random() * 10
 
+        result.Availability = card and card.Availability
         if not sameCard(card, result) then
             card = result
         end
@@ -1907,12 +1850,691 @@ local function updateEgg(uid, model, rec, now)
     return card
 end
 
+-- =========================================================
+-- COLETA: VIAGEM MANUAL OU FARM CONTINUO DOS OVOS APROVADOS
+-- O farm reavalia o lote apos cada entrega e espera novos alvos quando esgota.
+-- Posse conferida por ReadCarryState.Uid; remocao/Claimed nao prova entrega.
+-- =========================================================
+local collector = {
+    enabled = false, generation = 0, seen = {}, attempted = {}, pending = false,
+    changedAt = 0, startedAt = 0, humanoid = nil, prompt = nil,
+    cleanup = nil, finished = false,
+}
+-- Associacao por ancora observada ANTES da aproximacao.
+local promptAnchors={pool={},bindings={},pending={},records={},models={},elapsed=0}
+function promptAnchors.position(prompt)
+    local parent=prompt.Parent
+    if not parent then return nil end
+    if parent:IsA("Attachment") then return parent.WorldPosition end
+    if parent:IsA("BasePart") then return parent.Position end
+    if parent:IsA("Model") then return parent:GetPivot().Position end
+end
+function promptAnchors.track(object)
+    if object:IsA("ProximityPrompt") and object.Name=="CarryAreaEgg" then promptAnchors.pool[object]=true end
+end
+for _,object in ipairs(Workspace:GetDescendants()) do promptAnchors.track(object) end
+connect(Workspace.DescendantAdded,promptAnchors.track)
+connect(Workspace.DescendantRemoving,function(object)
+    promptAnchors.pool[object]=nil
+    promptAnchors.bindings[object]=nil
+    promptAnchors.pending[object]=nil
+end)
+function promptAnchors.valid(binding,records,models)
+    local record=records[binding.uid]
+    return record and record.State~="Claimed" and typeof(record.BottomCFrame)=="CFrame"
+        and (record.BottomCFrame.Position-binding.bottom).Magnitude<=0.05
+        -- Modelo visual pode nao estar carregado; UID + ancora continuam verificaveis.
+        and (binding.model==nil or (models[binding.uid]==binding.model and binding.model.Parent~=nil))
+end
+function promptAnchors.sample()
+    local character=player.Character
+    local root=character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local records,models=promptAnchors.records,promptAnchors.models
+    local now=os.clock()
+    for prompt in pairs(promptAnchors.pool) do
+        local binding=promptAnchors.bindings[prompt]
+        if binding and not promptAnchors.valid(binding,records,models) then
+            promptAnchors.bindings[prompt]=nil;binding=nil
+        end
+        local position=promptAnchors.position(prompt)
+        local matchedUid=nil
+        local matchCount=0
+        if position then
+            for eggUid,record in pairs(records) do
+                if record.State~="Claimed" and typeof(record.BottomCFrame)=="CFrame"
+                    and (position-record.BottomCFrame.Position).Magnitude<=0.05 then
+                    matchCount=matchCount+1;matchedUid=eggUid
+                end
+            end
+        end
+        if matchCount==1 and (root.Position-position).Magnitude>=12 then
+            local record=records[matchedUid]
+            local bottom=record.BottomCFrame.Position
+            if binding and binding.uid~=matchedUid then promptAnchors.bindings[prompt]=nil end
+            local pending=promptAnchors.pending[prompt]
+            if not pending or pending.uid~=matchedUid or pending.model~=models[matchedUid]
+                or (pending.bottom-bottom).Magnitude>0.05 then
+                promptAnchors.pending[prompt]={uid=matchedUid,bottom=bottom,model=models[matchedUid],since=now}
+            elseif now-pending.since>=0.2 then
+                promptAnchors.bindings[prompt]={uid=matchedUid,bottom=bottom,model=models[matchedUid]}
+            end
+        else
+            promptAnchors.pending[prompt]=nil
+        end
+    end
+end
+connect(game:GetService("RunService").Heartbeat,function(dt)
+    if not alive or not collector.enabled or paused then return end
+    promptAnchors.elapsed=promptAnchors.elapsed+dt
+    if promptAnchors.elapsed<0.25 then return end
+    promptAnchors.elapsed=0
+    promptAnchors.sample()
+end)
+local collectionStatus = text(settings, {
+    Text = "Coleta desligada.", Size = UDim2.new(1, -8, 0, 64),
+    LayoutOrder = 100,
+})
+local function collectionMessage(message)
+    if alive then collectionStatus.Text = message end
+end
+local updateFarmToggle=nil
+local function setFarmEnabled(value)
+    value=value==true
+    local changed=cfg.FARM~=value
+    cfg.FARM=value
+    if updateFarmToggle then updateFarmToggle(value) end
+    if changed and writefile then
+        local saved=pcall(function() writefile(CONFIG_FILE,Http:JSONEncode(cfg)) end)
+        if not saved then collectionMessage("Estado do farm alterado; nao foi possivel salvar as configuracoes.") end
+    end
+end
+stopCollection = function(preservePreference)
+    if collector.returnMotionCleanup then collector.returnMotionCleanup();collector.returnMotionCleanup=nil end
+    if collector.restoreSpeed then collector.restoreSpeed() end
+    if collector.cleanup then collector.cleanup() end
+    collector.enabled = false
+    if preservePreference~=true then setFarmEnabled(false) end
+    collector.pending = false
+    collector.generation = collector.generation + 1
+    if collector.prompt then
+        pcall(function() collector.prompt:InputHoldEnd() end)
+        collector.prompt = nil
+    end
+    if collector.humanoid and collector.humanoid.Parent then
+        local root = collector.humanoid.RootPart
+        if root then collector.humanoid:MoveTo(root.Position) end
+    end
+    -- Busy so e liberado quando o worker antigo terminar.
+    collectionMessage("Coleta desligada. Viagem cancelada.")
+end
+local function startCollection(automatic)
+    if collectorBusy then
+        collectionMessage("Caminhada em andamento; cancele antes de iniciar outra.")
+        return
+    end
+    if isHopping then
+        collectionMessage("Cancele a busca de servidor antes de coletar.")
+        return
+    end
+    collector.automatic = automatic
+    setFarmEnabled(automatic)
+    collector.mode = "walk"
+    collector.enabled = true
+    collector.finished = false
+    table.clear(collector.seen)
+    table.clear(collector.attempted)
+    collector.pending = true
+    collector.startedAt = os.clock()
+    collector.changedAt = os.clock()
+    collectionMessage(automatic and "Farm ligado: buscando ovos com rendimento e tamanho aprovados no filtro do webhook..."
+        or "Ida e volta: aguardando os ovos carregarem...")
+    return true
+end
+addButton("Coletar ovo mais caro e voltar", function() startCollection(false) end)
+updateFarmToggle=addToggle("Farm continuo (filtro do webhook)",cfg.FARM,function(value)
+    if value then
+        if not startCollection(true) then updateFarmToggle(cfg.FARM) end
+    else
+        stopCollection()
+    end
+end)
+addButton("DESLIGAR coleta / cancelar viagem", stopCollection)
+
+-- Posicao do registro, com alternativa pelo modelo visual.
+local function collectionDestination(model, rec)
+    if rec and typeof(rec.BottomCFrame) == "CFrame" then return rec.BottomCFrame.Position end
+    if not model then return nil end
+    if model:IsA("Model") then return model:GetPivot().Position end
+    if model:IsA("BasePart") then return model.Position end
+    local part = model:FindFirstChildWhichIsA("BasePart", true)
+    return part and part.Position or nil
+end
+
+-- Ida e volta andando; sem teleporte.
+local function runCollection(uid, model, rec)
+    collectorBusy = true
+    collector.generation = collector.generation + 1
+    local generation = collector.generation
+    local tripReturned = false
+    local deliveryConfirmed = false
+    local deliveryConnection=nil
+    local interactionAttempted=false
+    local character = player.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    collector.humanoid = humanoid
+    local shown = {}
+    local promptService = game:GetService("ProximityPromptService")
+    local shownConnection = promptService.PromptShown:Connect(function(prompt) shown[prompt] = true end)
+    local hiddenConnection = promptService.PromptHidden:Connect(function(prompt) shown[prompt] = nil end)
+    local function active()
+        return alive and collector.enabled and not paused
+            and generation == collector.generation
+            and player.Character == character and root and root.Parent
+            and humanoid and humanoid.Parent and humanoid.Health > 0
+    end
+    local function readCarryState()
+        local state=modules.EggState
+        if not state or type(state.ReadCarryState)~="function" then return nil,"ReadCarryState indisponivel" end
+        local success,value=pcall(state.ReadCarryState)
+        if not success or type(value)~="table" then return nil,"Falha ao ler estado carregado" end
+        return value
+    end
+    local ok, err = pcall(function()
+        if not active() then error("personagem indisponivel", 0) end
+        local initialCarry,carryError=readCarryState()
+        if not initialCarry then error(carryError,0) end
+        if initialCarry.IsCarrying then error("Ja esta carregando um ovo; entregue antes de iniciar",0) end
+        if root.Anchored or humanoid.WalkSpeed <= 0 then
+            error("personagem imobilizado; saia da esteira antes de coletar", 0)
+        end
+        if collector.automatic and not isTarget(cached[uid]) then
+            error("Alvo fora do filtro do webhook antes da partida",0)
+        end
+        local origin = DEFAULT_POSITION
+        local eggTarget = collectionDestination(model, rec)
+        if not eggTarget then error("ovo sem posicao", 0) end
+        -- Ponto fixo de preparacao e retorno, compartilhado por todos os usuarios.
+        local returnTarget=origin
+        local returningToDefault=false
+        -- Evidencia positiva do jogo, nunca apenas sumico de Drop/Triggered.
+        -- Ignora mensagens que ja estavam visiveis antes desta viagem.
+        local visibleMessages={}
+        local function deliveryMessages()
+            local found={}
+            for _,object in ipairs(host:GetDescendants()) do
+                if object:IsA("TextLabel") or object:IsA("TextButton") then
+                    local text=object.Text:lower():gsub("<[^>]->", "")
+                    if text:find("you stole an egg",1,true) then
+                        local visible=object.Visible
+                        local ancestor=object.Parent
+                        while visible and ancestor and ancestor~=host do
+                            if ancestor:IsA("GuiObject") and not ancestor.Visible then visible=false end
+                            if ancestor:IsA("ScreenGui") and not ancestor.Enabled then visible=false end
+                            ancestor=ancestor.Parent
+                        end
+                        if visible then found[object]=object.Text end
+                    end
+                end
+            end
+            return found
+        end
+        visibleMessages=deliveryMessages()
+        local deliveryElapsed=0
+        deliveryConnection=game:GetService("RunService").Heartbeat:Connect(function(dt)
+            deliveryElapsed=deliveryElapsed+dt
+            if deliveryElapsed<0.1 or not active() then return end
+            deliveryElapsed=0
+            local current=deliveryMessages()
+            for object in pairs(current) do
+                if not visibleMessages[object] and returningToDefault then
+                    deliveryConfirmed=true
+                end
+            end
+            visibleMessages=current
+        end)
+        -- Um unico destino por perna: sem PathfindingService nem desvios intermediarios.
+        local function walkTo(target, returning, targetProvider)
+            returningToDefault=returning
+            local function flatDistance(a,b)
+                return Vector3.new(a.X-b.X,0,a.Z-b.Z).Magnitude
+            end
+            local arrivalRadius=returning and 3 or 0.03
+            local verticalTolerance=math.max(6,humanoid.HipHeight+root.Size.Y/2+3)
+            local previousPosition=root.Position
+            local arrived=false
+            local function updateReturnCrossing()
+                if not returning or arrived then return arrived end
+                local current=root.Position
+                local delta=Vector3.new(current.X-previousPosition.X,0,current.Z-previousPosition.Z)
+                local offset=Vector3.new(target.X-previousPosition.X,0,target.Z-previousPosition.Z)
+                local lengthSquared=delta:Dot(delta)
+                local t=lengthSquared>0 and math.clamp(offset:Dot(delta)/lengthSquared,0,1) or 0
+                local closestHeight=previousPosition.Y+(current.Y-previousPosition.Y)*t
+                if (offset-delta*t).Magnitude<=arrivalRadius and math.abs(closestHeight-target.Y)<=verticalTolerance then
+                    arrived=true
+                end
+                previousPosition=current
+                return arrived
+            end
+            local normalSpeed=humanoid.WalkSpeed
+            local appliedSpeed=nil
+            local function restoreSpeed()
+                if appliedSpeed and humanoid.Parent and humanoid.WalkSpeed==appliedSpeed then humanoid.WalkSpeed=normalSpeed end
+                appliedSpeed=nil
+            end
+            collector.restoreSpeed=restoreSpeed
+            local initialDistance=flatDistance(root.Position,target)
+            local deadline=os.clock()+math.clamp(initialDistance/math.max(normalSpeed,1)*3+60,120,1800)
+            local runService=game:GetService("RunService")
+            local binding="DiceRadarDirect_"..tostring(generation)
+            local bound=false
+            local stableSince=nil
+            local controlError=nil
+            local lastMessage=0
+            local progressPosition=root.Position
+            local progressTime=os.clock()
+            local failure="Caminhada interrompida"
+            local function cleanupMotion()
+                if bound then runService:UnbindFromRenderStep(binding);bound=false end
+                if humanoid.Parent then humanoid:Move(Vector3.zero,false) end
+            end
+            collector.returnMotionCleanup=cleanupMotion
+            bound=true
+            runService:BindToRenderStep(binding,Enum.RenderPriority.Character.Value+1,function(dt)
+                local success,problem=pcall(function()
+                    if not active() or controlError or arrived then humanoid:Move(Vector3.zero,false);return end
+                    if updateReturnCrossing() then humanoid:Move(Vector3.zero,false);return end
+                    local delta=Vector3.new(target.X-root.Position.X,0,target.Z-root.Position.Z)
+                    local distance=delta.Magnitude
+                    local verticalOK=math.abs(root.Position.Y-target.Y)<=verticalTolerance
+                    if not returning then
+                        -- So a ida freia e centraliza; a volta preserva a velocidade do jogo.
+                        if appliedSpeed and humanoid.WalkSpeed~=appliedSpeed then normalSpeed=humanoid.WalkSpeed;appliedSpeed=nil
+                        elseif not appliedSpeed then normalSpeed=humanoid.WalkSpeed end
+                        local velocity=root.AssemblyLinearVelocity
+                        local actual=Vector3.new(velocity.X,0,velocity.Z).Magnitude
+                        local brakeDistance=math.max(30,math.max(normalSpeed,actual)*0.45+20)
+                        if distance<=arrivalRadius then
+                            humanoid:Move(Vector3.zero,false)
+                            if verticalOK and actual<0.3 then
+                                stableSince=stableSince or os.clock()
+                                arrived=os.clock()-stableSince>=0.15
+                            else stableSince=nil end
+                            return
+                        end
+                        stableSince=nil
+                        if distance<4 then
+                            appliedSpeed=math.min(normalSpeed,6,distance*0.35/math.max(dt,1/240))
+                            humanoid.WalkSpeed=appliedSpeed
+                        elseif distance<brakeDistance and normalSpeed>12 then
+                            appliedSpeed=math.min(normalSpeed,math.max(2,math.sqrt(160*math.max(distance-arrivalRadius,0))))
+                            humanoid.WalkSpeed=appliedSpeed
+                        else restoreSpeed() end
+                    end
+                    if distance>0 then humanoid:Move(delta.Unit,false) end
+                end)
+                if not success then controlError=tostring(problem) end
+            end)
+            while active() and not arrived and not controlError and os.clock()<deadline do
+                if targetProvider then
+                    local latest=targetProvider()
+                    if not latest then failure="Alvo removido durante a ida";break end
+                    if (latest-target).Magnitude>0.1 then
+                        target=latest;stableSince=nil;progressPosition=root.Position;progressTime=os.clock()
+                    end
+                end
+                local distance=flatDistance(root.Position,target)
+                if distance>4 then
+                    if flatDistance(root.Position,progressPosition)>=1 then
+                        progressPosition=root.Position;progressTime=os.clock()
+                    elseif os.clock()-progressTime>=0.75 then
+                        failure="Passagem direta bloqueada: sem progresso por 0.75s"
+                        break
+                    end
+                else progressPosition=root.Position;progressTime=os.clock() end
+                if os.clock()-lastMessage>=0.25 then
+                    lastMessage=os.clock()
+                    collectionMessage(string.format((returning and "Voltando direto ao DEFAULT" or "Indo direto ao destino").." | faltam %.1f studs",distance))
+                end
+                runService.Heartbeat:Wait()
+            end
+            cleanupMotion();collector.returnMotionCleanup=nil
+            restoreSpeed();collector.restoreSpeed=nil
+            if controlError then error(controlError,0) end
+            if not arrived and os.clock()>=deadline then failure="Tempo de caminhada direta esgotado" end
+            return arrived,failure
+        end
+
+        local promptPosition=promptAnchors.position
+        local function belongsToSelectedEgg(prompt)
+            if not prompt or not prompt.Parent then return false,"removido" end
+            if prompt.Name~="CarryAreaEgg" and prompt.Name~="StealPrompt" then
+                return false,"tipo diferente"
+            end
+            if rec and rec.State=="Claimed" then return false,"alvo indisponivel" end
+            local inside=model and model.Parent and prompt:IsDescendantOf(model)
+            local owner=prompt
+            local matched=false
+            while owner and owner~=Workspace do
+                for _,key in ipairs({"EggUid","UID","Uid"}) do
+                    local value=owner:GetAttribute(key)
+                    if value~=nil then
+                        if tostring(value)~=tostring(uid) then return false,"UID diferente" end
+                        matched=true
+                    end
+                end
+                if owner==model then break end
+                owner=owner.Parent
+            end
+            if inside then return true,"modelo do alvo" end
+            if matched then return true,"UID do alvo" end
+            local binding=promptAnchors.bindings[prompt]
+            if binding then
+                local currentModels,currentRecords=collectSources()
+                if not promptAnchors.valid(binding,currentRecords,currentModels) then
+                    promptAnchors.bindings[prompt]=nil
+                    return false,"ancora invalidada: ovo removido, substituido ou deslocado"
+                end
+                if binding.uid~=tostring(uid) then return false,"ancora pertence a outro UID" end
+                return true,"ancora BottomCFrame observada antes da aproximacao"
+            end
+            return false,"sem UID/modelo ou ancora previa valida"
+        end
+        local function selectPrompt()
+            local selected=nil
+            local count=0
+            local inspected={}
+            local function consider(prompt)
+                if inspected[prompt] then return end
+                inspected[prompt]=true
+                if not prompt:IsA("ProximityPrompt") or not prompt.Parent or not prompt.Enabled then return end
+                if not belongsToSelectedEgg(prompt) then return end
+                local position=promptPosition(prompt)
+                if not position or (root.Position-position).Magnitude>prompt.MaxActivationDistance then return end
+                if prompt.RequiresLineOfSight then
+                    local params=RaycastParams.new()
+                    params.FilterType=Enum.RaycastFilterType.Exclude
+                    params.FilterDescendantsInstances={character}
+                    params.RespectCanCollide=true
+                    local hit=Workspace:Raycast(root.Position,position-root.Position,params)
+                    if hit and (hit.Position-position).Magnitude>2
+                        and not (model and hit.Instance:IsDescendantOf(model)) then return end
+                end
+                selected=prompt;count=count+1
+            end
+            if model and model.Parent then
+                for _,object in ipairs(model:GetDescendants()) do consider(object) end
+            end
+            for prompt in pairs(shown) do consider(prompt) end
+            for prompt in pairs(promptAnchors.pool) do consider(prompt) end
+            return count==1 and selected or nil,count
+        end
+        collectionMessage("Preparando: indo ao ponto DEFAULT antes da coleta...")
+        local atDefault,defaultWhy=walkTo(origin,false)
+        if not active() then return end
+        if not atDefault then error("Nao chegou ao DEFAULT: "..tostring(defaultWhy),0) end
+        -- A rota de preparacao nao e uma rota de retorno do ovo.
+        local lastTargetRefresh=0
+        local function refreshTarget(force)
+            if not force and os.clock()-lastTargetRefresh<0.25 then return eggTarget end
+            lastTargetRefresh=os.clock()
+            local currentModels,currentRecords=collectSources()
+            promptAnchors.models=currentModels;promptAnchors.records=currentRecords
+            model=currentModels[tostring(uid)]
+            local current=currentRecords[tostring(uid)]
+            if not current or current.State=="Claimed" then eggTarget=nil;return nil end
+            rec=current
+            eggTarget=collectionDestination(model,rec)
+            return eggTarget
+        end
+        local currentDestination=refreshTarget(true)
+        local arrived,why=false,"Alvo indisponivel antes da aproximacao"
+        if currentDestination then
+            collectionMessage("Indo diretamente ao ovo...")
+            arrived,why=walkTo(currentDestination,false,refreshTarget)
+        end
+        if not active() then return end
+        local outcome="Ida interrompida: "..tostring(why)
+        if arrived then
+            humanoid:MoveTo(root.Position)
+            collectionMessage("No centro: preparando coleta...")
+            local deadline=os.clock()+5
+            local prompt,count
+            repeat
+                prompt,count=selectPrompt()
+                if prompt or not active() then break end
+                task.wait(0.1)
+            until os.clock()>=deadline
+            if not active() then return end
+            outcome=count and count>1 and "Interacao ambigua; coleta nao tentada."
+                or "Sem prompt unico por UID/modelo ou ancora previa; coleta bloqueada."
+            if prompt then
+                interactionAttempted=true
+                local _,association=belongsToSelectedEgg(prompt)
+                local triggered=false
+                local originalExclusivity=prompt.Exclusivity
+                local connection=prompt.Triggered:Connect(function(who)
+                    if who==player then triggered=true end
+                end)
+                collector.prompt=prompt
+                local originalHold=prompt.HoldDuration
+                local cleaned=false
+                local function cleanupInteraction()
+                    if cleaned then return end
+                    cleaned=true
+                    pcall(function() prompt:InputHoldEnd() end)
+                    pcall(function() prompt.HoldDuration=originalHold end)
+                    pcall(function()
+                        if prompt.Exclusivity==Enum.ProximityPromptExclusivity.AlwaysShow then
+                            prompt.Exclusivity=originalExclusivity
+                        end
+                    end)
+                    connection:Disconnect()
+                end
+                collector.cleanup=cleanupInteraction
+                local interactionOK,interactionError=pcall(function()
+                    local belongs,reason=belongsToSelectedEgg(prompt)
+                    if not belongs then error("Prompt perdeu vinculo com o alvo: "..reason,0) end
+                    collectionMessage("Preparando exibicao do prompt selecionado | UID "..tostring(uid))
+                    prompt.Exclusivity=Enum.ProximityPromptExclusivity.AlwaysShow
+                    local showDeadline=os.clock()+0.75
+                    while active() and prompt.Parent and prompt.Enabled and not shown[prompt]
+                        and os.clock()<showDeadline do
+                        game:GetService("RunService").Heartbeat:Wait()
+                    end
+                    local promptVisible=shown[prompt]==true
+                    if not active() then return end
+                    if not promptVisible then error("Prompt selecionado continua oculto; interacao bloqueada",0) end
+                    belongs,reason=belongsToSelectedEgg(prompt)
+                    if not belongs then error("Prompt perdeu vinculo antes do hold: "..reason,0) end
+                    local position=promptPosition(prompt)
+                    if not position or not prompt.Enabled or (root.Position-position).Magnitude>prompt.MaxActivationDistance then
+                        error("Prompt indisponivel ou fora do alcance antes do hold",0)
+                    end
+                    if collector.automatic then
+                        -- Releitura do mesmo predicado do webhook, imediatamente antes do hold.
+                        local currentModels,currentRecords=collectSources()
+                        local record=currentRecords[tostring(uid)]
+                        if not record or record.State=="Claimed" then error("Alvo indisponivel antes da coleta",0) end
+                        local updated,data=pcall(updateEgg,uid,currentModels[tostring(uid)],record,os.clock())
+                        local approved=updated and isTarget(data)==true
+                        if not approved then error("Alvo nao atende mais ao filtro do webhook; coleta bloqueada",0) end
+                    end
+                    collectionMessage("Coletando ovo selecionado...")
+                    if prompt.Name=="CarryAreaEgg" then prompt.HoldDuration=0 end
+                    prompt:InputHoldBegin()
+                    local holdUntil=os.clock()+prompt.HoldDuration
+                    -- Mesmo com duracao zero, deixa o motor processar um frame.
+                    game:GetService("RunService").Heartbeat:Wait()
+                    if not triggered and prompt.Parent and not belongsToSelectedEgg(prompt) then error("Vinculo do prompt mudou durante a interacao",0) end
+                    while active() and not triggered and prompt.Parent and prompt.Enabled
+                        and os.clock()<holdUntil do
+                        game:GetService("RunService").Heartbeat:Wait()
+                        if not triggered and prompt.Parent and not belongsToSelectedEgg(prompt) then error("Vinculo do prompt mudou durante a interacao",0) end
+                    end
+                    prompt:InputHoldEnd()
+                    local waitUntil=os.clock()+0.25
+                    while active() and not triggered and prompt.Parent and prompt.Enabled
+                        and os.clock()<waitUntil do
+                        game:GetService("RunService").Heartbeat:Wait()
+                    end
+                end)
+                cleanupInteraction()
+                collector.cleanup=nil
+                collector.prompt=nil
+                outcome=interactionOK and (triggered
+                    and ("Interacao acionada por "..association.."; posse do ovo nao confirmada.")
+                    or "Interacao sem confirmacao; verifique a coleta.")
+                    or "Falha na interacao: "..tostring(interactionError)
+            end
+        end
+        if not active() then return end
+        if interactionAttempted then
+            collectionMessage("Conferindo ovo carregado...")
+            local carryDeadline=os.clock()+2
+            local carried
+            repeat
+                carried=readCarryState()
+                if carried and carried.IsCarrying then break end
+                game:GetService("RunService").Heartbeat:Wait()
+            until not active() or os.clock()>=carryDeadline
+            if not active() then return end
+            if not carried or not carried.IsCarrying then
+                error("Coleta sem confirmacao de posse; automatico interrompido",0)
+            end
+            if tostring(carried.Uid)~=tostring(uid) then
+                error("Ovo errado: alvo "..tostring(uid)..", carregado "..tostring(carried.Uid).."; automatico interrompido",0)
+            end
+            outcome="Ovo correto confirmado."
+        end
+        collectionMessage(outcome.." Voltando ao ponto de partida...")
+        local returned,returnWhy=walkTo(returnTarget,true)
+        tripReturned = returned and active()
+        if returned and active() and not deliveryConfirmed then
+            collectionMessage("Dentro da base: aguardando confirmacao de entrega...")
+            local confirmationDeadline=os.clock()+2
+            while active() and not deliveryConfirmed and os.clock()<confirmationDeadline do
+                game:GetService("RunService").Heartbeat:Wait()
+            end
+        end
+        if active() then
+            collectionMessage(deliveryConfirmed and "Entrega confirmada pelo jogo."
+                or (returned and "Retorno concluido; entrega nao confirmada."
+                or "Retorno interrompido: "..tostring(returnWhy)))
+        end
+    end)
+    if deliveryConnection then deliveryConnection:Disconnect();deliveryConnection=nil end
+    if collector.returnMotionCleanup then collector.returnMotionCleanup();collector.returnMotionCleanup=nil end
+    if collector.restoreSpeed then collector.restoreSpeed();collector.restoreSpeed=nil end
+    shownConnection:Disconnect()
+    hiddenConnection:Disconnect()
+    if collector.cleanup then collector.cleanup();collector.cleanup=nil end
+    if collector.prompt then
+        pcall(function() collector.prompt:InputHoldEnd() end)
+        collector.prompt=nil
+    end
+    if alive and generation==collector.generation and not active() then
+        collectionMessage("Viagem interrompida: personagem morreu, mudou ou radar foi pausado.")
+    end
+    if humanoid and humanoid.Parent and root and root.Parent then humanoid:MoveTo(root.Position) end
+    if not ok and alive then collectionMessage("Falha na caminhada: "..tostring(err)) end
+    collector.humanoid=nil
+    -- Entrega sem mensagem nao encerra o farm se ja voltamos e estamos livres.
+    -- Nao inicia outra viagem enquanto ainda carrega um ovo ou a leitura falha.
+    local readyForNext=false
+    local finalCarry=nil
+    if collector.automatic and ok and tripReturned and active() then
+        finalCarry=readCarryState()
+        readyForNext=finalCarry~=nil and finalCarry.IsCarrying==false
+    end
+    collectorBusy=false
+    if collector.automatic and collector.enabled and generation==collector.generation
+        and ok and tripReturned and readyForNext then
+        collector.finished=false
+        -- Reavalia imediatamente os ovos restantes, sem esperar UIDs novos.
+        -- attempted preserva os UIDs ja tentados nesta sessao de farm.
+        collector.pending=true
+        if os.clock()-collector.changedAt>=3 then
+            collector.startedAt=os.clock()-12
+        end
+        collectionMessage(collectionStatus.Text.." Farm ligado: buscando o proximo ovo aprovado no filtro.")
+    else
+        collector.finished=true
+        collector.pending=false
+        if collector.automatic and collector.enabled then
+            collector.enabled=false
+            setFarmEnabled(false)
+            local reason=finalCarry and finalCarry.IsCarrying
+                and "personagem ainda carrega um ovo."
+                or "retorno incompleto ou estado do personagem indisponivel."
+            collectionMessage(collectionStatus.Text.." Automatico desligado: "..reason)
+        end
+    end
+    lastValidEggTime=os.clock()
+end
+
+local function updateCollection(models, records, all, now)
+    if not collector.enabled or collector.finished then return end
+    for uid in pairs(all) do
+        if not collector.seen[uid] then
+            collector.seen[uid] = true
+            if not collector.pending then collector.startedAt = now end
+            collector.pending = true
+            collector.changedAt = now
+        end
+    end
+    if collectorBusy or isHopping or not collector.pending or paused then return end
+    if now - collector.changedAt < 3 and now - collector.startedAt < 12 then return end
+    local bestUid, bestModel, bestRecord, bestRate
+    local pendingData = false
+    local counts = {total=0, noModel=0, pending=0, missing=0, ambiguous=0, claimed=0, tried=0, filtered=0}
+    for uid in pairs(all) do
+        counts.total = counts.total + 1
+        local model, data, rec = models[uid], cached[uid], records[uid]
+        if collector.attempted[uid] then
+            counts.tried = counts.tried + 1
+        elseif rec and rec.State == "Claimed" then
+            counts.claimed = counts.claimed + 1
+        elseif not collectionDestination(model, rec) then
+            counts.noModel = counts.noModel + 1
+            pendingData = true
+        elseif not data or not data.Ready then
+            counts.pending = counts.pending + 1
+            pendingData = true
+        elseif collector.automatic and not isTarget(data) then
+            counts.filtered = counts.filtered + 1
+        else
+            if not bestRate or data.R > bestRate
+                or (data.R == bestRate and uid < bestUid) then
+                bestUid, bestModel, bestRecord, bestRate = uid, model, rec, data.R
+            end
+        end
+    end
+    if bestUid and not (pendingData and now - collector.startedAt < 12) then
+        collector.pending = false
+        collector.attempted[bestUid] = true
+        collectorBusy = true
+        task.spawn(runCollection, bestUid, bestModel, bestRecord)
+    else
+        -- Sem candidato agora: continua verificando dados, novos ovos e filtros.
+        collectionMessage(string.format(
+            "Aguardando: %d ovos | sem posicao: %d | renda pendente: %d\nFora do filtro: %d | indisponiveis: %d | tentados: %d",
+            counts.total, counts.noModel, counts.pending, counts.filtered, counts.claimed, counts.tried))
+    end
+end
+
 local lastScanWarning = 0
 
 local function scan()
     loadModules()
 
     local models, records, all = collectSources()
+    if collector.enabled then
+        promptAnchors.models=models
+        promptAnchors.records=records
+    end
     local total, targets, best, errors = 0, 0, 0, 0
     local now = os.clock()
 
@@ -1945,7 +2567,6 @@ local function scan()
         if not all[uid] then
             cached[uid] = nil
             cacheState[uid] = nil
-            knownSources[uid] = nil
             notified[uid] = nil
             dataVersion = dataVersion + 1
 
@@ -1961,13 +2582,14 @@ local function scan()
     for uid in pairs(cacheState) do
         if not all[uid] then
             cacheState[uid] = nil
-            knownSources[uid] = nil
         end
     end
 
-    if targets > 0 then
+    updateCollection(models, records, all, now)
+
+    if targets > 0 or collectorBusy then
         lastValidEggTime = now
-    elseif errors == 0 and cfg.AH and not isHopping
+    elseif errors == 0 and cfg.AH and not isHopping and not collector.enabled
         and now - lastValidEggTime >= cfg.AHT then
         task.spawn(doServerHop)
     end
@@ -1975,7 +2597,7 @@ local function scan()
     if not minimized and not mobile then
         local stateText = "Monitorando o mapa"
 
-        if cfg.AH and targets == 0 then
+        if cfg.AH and targets == 0 and not collector.enabled then
             local remaining = math.max(
                 0, math.ceil(cfg.AHT - (now - lastValidEggTime))
             )
@@ -2000,6 +2622,9 @@ body.Visible = false
 minimizeButton.Text = "+"
 
 layout()
+
+-- Restaura o farm salvo quando o script e carregado novamente.
+if cfg.FARM then startCollection(true) end
 
 task.spawn(function()
     while alive do
