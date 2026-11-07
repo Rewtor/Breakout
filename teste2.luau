@@ -1256,6 +1256,35 @@ end
 -- CALCULO UNICO POR OVO
 -- =========================================================
 
+local mutationNames = {
+    gold = "Gold", golden = "Gold", gld = "Gold",
+    silver = "Silver", slv = "Silver",
+    rainbow = "Rainbow", rbw = "Rainbow",
+}
+
+local function mutationLabel(value)
+    local names = {}
+    local seen = {}
+    local function add(raw)
+        if type(raw) ~= "string" then return end
+        local name = mutationNames[raw:lower():match("^%s*(.-)%s*$")]
+        if name and not seen[name] then
+            seen[name] = true
+            table.insert(names, name)
+        end
+    end
+    if type(value) == "string" then
+        for name in value:gmatch("[^,;|]+") do add(name) end
+    elseif type(value) == "table" then
+        for key, entry in pairs(value) do
+            if type(key) == "number" then add(entry)
+            elseif entry == true then add(key) end
+        end
+    end
+    table.sort(names)
+    return #names > 0 and table.concat(names, ", ") or "—"
+end
+
 local function buildCard(uid, model, rec, attrs, visual)
     local mutation = attrs.Mutations or attrs.Mutation or rec.Mutations or rec.Mutation
     local mutationMult, mutationNote = mutationInfo(mutation)
@@ -1270,6 +1299,7 @@ local function buildCard(uid, model, rec, attrs, visual)
         Rar = "Normal",
         Ready = false,
         MutationNote = mutationNote,
+        MutationLabel = mutationLabel(mutation),
     }
 
     -- Halloween: não passa pelo calculo generico.
@@ -1548,6 +1578,7 @@ local function notifyEgg(uid)
                     {name="Raridade", value=data.Rar, inline=true},
                     {name="Tamanho", value=data.P, inline=true},
                     {name="Dinheiro/s", value="$"..short(data.R).."/s", inline=true},
+                    {name="Mutação", value=data.MutationLabel or "—", inline=true},
                     {name="Servidor", value="[Abrir servidor]("..link..")", inline=false},
                 },
             }},
