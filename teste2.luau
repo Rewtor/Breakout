@@ -640,7 +640,7 @@ addBox("Webhook do alerta especial", cfg.SpecialWebhook, function(v) cfg.Special
 addBox("Rendimento mínimo para webhook padrão ($/s)", cfg.WebhookMinIncome, function(v)
     cfg.WebhookMinIncome = math.max(0, finite(v) or 0)
 end)
-addBox("Ping Discord ID", cfg.P, function(v) cfg.P = v end)
+addBox("Ping Discord ID (só alerta especial)", cfg.P, function(v) cfg.P = v end)
 
 addBox("Rendimento mínimo ($/s)", cfg.I, function(v)
     cfg.I = math.max(0, finite(v) or 0)
@@ -1595,7 +1595,7 @@ local function notifyEgg(uid, special)
         local content = "**" .. player.Name .. "** encontrou **"
             .. data.C .. "** de **" .. short(data.R) .. "/s**"
 
-        if cfg.P ~= "" then content = content .. " <@" .. cfg.P .. ">" end
+        if special and cfg.P ~= "" then content = content .. " <@" .. cfg.P .. ">" end
 
         local success = postWebhook({
             content = special and ("🚨 Ovo especial! " .. content) or content,
@@ -1666,7 +1666,7 @@ addButton("Enviar teste ao Discord", function()
             or "Nenhum ovo calculado no momento."
 
         local ok = postWebhook({
-            content = "Teste do Dice Radar!" .. (cfg.P ~= "" and (" <@" .. cfg.P .. ">") or ""),
+            content = "Teste do Dice Radar!",
             embeds = {{
                 title = "Teste do radar",
                 description = string.sub(description, 1, 3900),
