@@ -181,6 +181,12 @@ if boundary and type(boundary.definitions)=="table" then
         local owner = functionOwners[boundary.definitions[id]]
         if owner then mapped[#mapped+1]={callback=id,constructor=owner.constructor}
         else unmapped[#unmapped+1]=id end
+        -- These values are lazy and are absent from next() until accessed.
+        -- Resolve them while their original decoder and buffer still exist.
+        local specification=boundary.definitions[id+1]
+        assert(type(specification)=="table" and #specification%3==0,"Original capture specification unavailable: "..id)
+        for index=1,#specification do assert(type(specification[index])=="number","Invalid capture specification") end
+        rawset(boundary.definitions,id+1,specification)
     end
 end
 local report={constructors=constructors,boundaries=nativeBoundaries,mapped=mapped,unmapped=unmapped,failure=not ok and tostring(failure) or nil}

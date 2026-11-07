@@ -24,7 +24,7 @@ O inventário possui 14 fábricas numéricas, incluindo 11 e 92, ambas com 19 pa
 
 O coletor grava Chilli_OriginalCapture.json e relata quantos dos dez callbacks foram associados a construtores reais. Referências ao runtime, aos ambientes globais e a objetos externos são omitidas do grafo. A saída tem limites de objetos e bytes. Nenhum dos substitutos da réplica é importado.
 
-**Ainda não validado dentro do Roblox.** Os observadores podem afetar verificações da proteção; a existência do coletor não comprova que a captura funcionará. Resultado sem limite da aplicação alcançado ou sem mapeamento dos dez callbacks é explicitamente incompleto. Mesmo uma captura completa ainda precisa passar pela desvirtualização e validação.
+Uma primeira captura enviada pelo usuário alcançou a aplicação e associou os dez callbacks originais. Entretanto, as especificações de captura eram carregadas sob demanda e ficaram ausentes da serialização. A revisão atual resolve explicitamente essas dez tabelas no ambiente original antes de gravá-las, validando seu formato numérico em triplas. Essa correção passou por teste sintético com metatable lazy, conferência dos bytes originais e compilação; ainda requer uma nova execução no jogo. A recuperação e a equivalência dos callbacks continuam pendentes.
 
 ## Ferramentas
 
