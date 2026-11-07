@@ -41,11 +41,14 @@ end
 
 local cfg = {
     W = "",
+    SpecialWebhook = "",
+    WebhookMinIncome = 0,
     P = "",
     I = 0,
     S = 0,
     WH = false,
     AH = false,
+    Sweep = false,
     AHT = 60,
     PC = 1,
 }
@@ -65,6 +68,8 @@ if isfile and readfile then
 end
 
 cfg.W = type(cfg.W) == "string" and cfg.W or ""
+cfg.SpecialWebhook = type(cfg.SpecialWebhook) == "string" and cfg.SpecialWebhook or ""
+cfg.WebhookMinIncome = math.max(0, finite(cfg.WebhookMinIncome) or 0)
 cfg.P = type(cfg.P) == "string" and cfg.P or ""
 cfg.I = math.max(0, finite(cfg.I) or 0)
 cfg.S = math.max(0, finite(cfg.S) or 0)
@@ -72,6 +77,7 @@ cfg.AHT = math.max(5, finite(cfg.AHT) or 60)
 cfg.PC = tonumber(cfg.PC) == 2 and 2 or 1
 cfg.WH = cfg.WH == true
 cfg.AH = cfg.AH == true
+cfg.Sweep = cfg.Sweep == true
 
 -- Encerra a versao anterior que usa o mesmo nome.
 local function removePrevious(parent)
@@ -211,6 +217,15 @@ local function isTarget(data)
         and data.CS >= cfg.S
 end
 
+local function isSpecialTarget(data)
+    return cfg.SpecialWebhook ~= "" and data and data.Ready and data.R >= cfg.I
+end
+
+local function shouldNotify(data)
+    return data and data.Ready and data.R >= cfg.WebhookMinIncome
+        and (cfg.Sweep or isTarget(data))
+end
+
 local render
 local doServerHop
 local cancelHop
@@ -218,6 +233,7 @@ local cancelHop
 local isHopping = false
 local hopGeneration = 0
 local lastValidEggTime = os.clock()
+local hasMatchingEgg = false
 
 -- =========================================================
 -- INTERFACE
@@ -620,6 +636,10 @@ local function filtersChanged()
 end
 
 addBox("Webhook URL", cfg.W, function(v) cfg.W = v end)
+addBox("Webhook do alerta especial", cfg.SpecialWebhook, function(v) cfg.SpecialWebhook = v end)
+addBox("Rendimento mínimo para webhook padrão ($/s)", cfg.WebhookMinIncome, function(v)
+    cfg.WebhookMinIncome = math.max(0, finite(v) or 0)
+end)
 addBox("Ping Discord ID", cfg.P, function(v) cfg.P = v end)
 
 addBox("Rendimento mínimo ($/s)", cfg.I, function(v)
@@ -632,7 +652,7 @@ addBox("Escala visual mínima (x, não kg)", cfg.S, function(v)
     filtersChanged()
 end)
 
-addBox("Tempo sem alvos antes do hop (mínimo 5 s)", cfg.AHT, function(v)
+addBox("Tempo antes do hop (mínimo 5 s)", cfg.AHT, function(v)
     cfg.AHT = math.max(5, finite(v) or 60)
     lastValidEggTime = os.clock()
 end)
@@ -641,8 +661,13 @@ addToggle("Notificações no Discord", cfg.WH, function(v)
     cfg.WH = v
 end)
 
-addToggle("Trocar servidor automaticamente sem alvos", cfg.AH, function(v)
+addToggle("Trocar servidor automaticamente", cfg.AH, function(v)
     cfg.AH = v
+    lastValidEggTime = os.clock()
+end)
+
+addToggle("Varredura: avisar todos e continuar trocando", cfg.Sweep, function(v)
+    cfg.Sweep = v
     lastValidEggTime = os.clock()
 end)
 
@@ -1518,16 +1543,17 @@ end
 
 local notified = {}
 local notificationBusy = {}
+local specialNotified = {}
+local specialBusy = {}
 
 local function joinLink()
     return "https://darling-liger-02e311.netlify.app/index.html?placeId="
         .. tostring(game.PlaceId) .. "&jobId=" .. tostring(game.JobId)
 end
 
-local function postWebhook(payload)
-    if not alive or not requestFn or cfg.W == "" then return false end
-
-    local url = cfg.W
+local function postWebhook(payload, url)
+    url = url or cfg.W
+    if not alive or not requestFn or url == "" then return false end
     local ok, response = pcall(function()
         return requestFn({
             Url = url,
@@ -1547,16 +1573,21 @@ local function postWebhook(payload)
     return status >= 200 and status < 300
 end
 
-local function notifyEgg(uid)
-    if notified[uid] or notificationBusy[uid] then return end
-    if not cfg.WH or cfg.W == "" or not requestFn then return end
+local function notifyEgg(uid, special)
+    local sent = special and specialNotified or notified
+    local busy = special and specialBusy or notificationBusy
+    local url = special and cfg.SpecialWebhook or cfg.W
+    local matches = special and isSpecialTarget or shouldNotify
+    if sent[uid] or busy[uid] then return end
+    if (not special and not cfg.WH) or url == "" or not requestFn then return end
+    if not special and cfg.Sweep and isHopping then return end
 
-    notificationBusy[uid] = true
+    busy[uid] = true
 
     task.spawn(function()
         local data = cached[uid]
-        if not alive or not cfg.WH or not isTarget(data) then
-            notificationBusy[uid] = nil
+        if not alive or (not special and not cfg.WH) or not matches(data) then
+            busy[uid] = nil
             return
         end
 
@@ -1567,7 +1598,7 @@ local function notifyEgg(uid)
         if cfg.P ~= "" then content = content .. " <@" .. cfg.P .. ">" end
 
         local success = postWebhook({
-            content = content,
+            content = special and ("🚨 Ovo especial! " .. content) or content,
             embeds = {{
                 title = "🥚 Ovo detectado!",
                 url = link,
@@ -1582,19 +1613,34 @@ local function notifyEgg(uid)
                     {name="Servidor", value="[Abrir servidor]("..link..")", inline=false},
                 },
             }},
-        })
+        }, url)
 
         if success then
-            notified[uid] = true
-            notificationBusy[uid] = nil
+            sent[uid] = true
+            busy[uid] = nil
         else
             -- Impede repetir a requisição a cada 1,5 s em caso de falha.
             task.delay(60, function()
-                notificationBusy[uid] = nil
+                busy[uid] = nil
             end)
         end
     end)
+    return true
 end
+
+addButton("Testar alerta especial", function()
+    if not requestFn or cfg.SpecialWebhook == "" then
+        hopStatus.Text = "Informe o webhook especial e confira o suporte a HTTP."
+        return
+    end
+    task.spawn(function()
+        local mention = cfg.P ~= "" and (" <@" .. cfg.P .. ">") or ""
+        local ok = postWebhook({content = "🚨 Teste do alerta especial do Dice Radar!" .. mention}, cfg.SpecialWebhook)
+        if alive then
+            hopStatus.Text = ok and "Teste especial enviado." or "Falha no teste especial."
+        end
+    end)
+end)
 
 addButton("Enviar teste ao Discord", function()
     if not requestFn or cfg.W == "" then
@@ -1645,8 +1691,8 @@ cancelHop = function()
     setHopState(false, "Busca cancelada. Temporizador reiniciado.")
 end
 
-doServerHop = function()
-    if isHopping or not alive then return end
+doServerHop = function(automatic)
+    if isHopping or not alive or (automatic and hasMatchingEgg) then return end
 
     hopGeneration = hopGeneration + 1
     local generation = hopGeneration
@@ -1724,6 +1770,10 @@ doServerHop = function()
 
                 if #candidates > 0 then
                     if not current() then return end
+                    if automatic and hasMatchingEgg then
+                        release("Alvo encontrado. Permanecendo no servidor.")
+                        return
+                    end
                     local selected = candidates[math.random(1, #candidates)]
                     hopStatus.Text = "Teleportando..."
                     Teleport:TeleportToPlaceInstance(game.PlaceId, selected, player)
@@ -1879,6 +1929,7 @@ local function collectSources()
             cacheState[uid] = nil
             knownSources[uid] = nil
             notified[uid] = nil
+            specialNotified[uid] = nil
             local row = rows[uid]
             if row then
                 row.frame:Destroy()
@@ -1946,6 +1997,7 @@ local function scan()
     local models, records, all = collectSources()
     local total, targets, best, errors = 0, 0, 0, 0
     local now = os.clock()
+    local sweepNoticeStarted = false
 
     for uid in pairs(all) do
         total = total + 1
@@ -1957,9 +2009,14 @@ local function scan()
         if ok and data then
             best = math.max(best, data.R)
 
-            if isTarget(data) then
+            local special = isSpecialTarget(data)
+            if isTarget(data) or special then
                 targets = targets + 1
-                notifyEgg(uid)
+            end
+            if special then notifyEgg(uid, true) end
+            if shouldNotify(data) and not sweepNoticeStarted then
+                local started = notifyEgg(uid)
+                sweepNoticeStarted = cfg.Sweep and started == true
             end
         else
             errors = errors + 1
@@ -1978,6 +2035,7 @@ local function scan()
             cacheState[uid] = nil
             knownSources[uid] = nil
             notified[uid] = nil
+            specialNotified[uid] = nil
             dataVersion = dataVersion + 1
 
             -- Libera objetos de ovos removidos mesmo com painel escondido.
@@ -1996,11 +2054,14 @@ local function scan()
         end
     end
 
-    if targets > 0 then
+    if targets > 0 or errors == 0 then
+        hasMatchingEgg = targets > 0
+    end
+    if hasMatchingEgg then
         lastValidEggTime = now
     elseif errors == 0 and cfg.AH and not isHopping
         and now - lastValidEggTime >= cfg.AHT then
-        task.spawn(doServerHop)
+        task.spawn(doServerHop, true)
     end
 
     if not minimized and not mobile then
@@ -2010,7 +2071,8 @@ local function scan()
             local remaining = math.max(
                 0, math.ceil(cfg.AHT - (now - lastValidEggTime))
             )
-            stateText = "Sem alvos • hop em " .. remaining .. "s"
+            local prefix = cfg.Sweep and "Varredura" or "Sem alvos"
+            stateText = prefix .. " • hop em " .. remaining .. "s"
         end
 
         setText(stat, string.format(
