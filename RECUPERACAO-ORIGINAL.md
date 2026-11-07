@@ -28,6 +28,8 @@ Uma primeira captura enviada pelo usuário alcançou a aplicação e associou os
 
 ## Ferramentas
 
+A segunda captura (`dc69e8e492bef18b9de7373f91781d002a05164f4a7648681b0651320f35e912`) trouxe as dez especificações, conferidas contra os pontos de ligação nativos: 145 dependências no total, 30 no callback 7. A leitura offline das constantes da camada interna ainda falha em comparações com valores já capturados. A revisão atual resolve também as quatro tabelas de constantes de cada callback usando seus metatables originais, antes da serialização. Essa mudança passou em teste sintético com constantes lazy e na compilação; sua execução no jogo ainda está pendente. Não representa recuperação concluída nem teleporte validado.
+
 - Gerar e conferir bytes/sintaxe: `node recovered/optimization/build-original-capture.cjs`.
 - Importar dados sem executar Lua: `node recovered/optimization/import-original-capture.cjs <arquivo.json>`.
 - original-factory-catalog.json: localização, aridade e hash de cada fábrica original.

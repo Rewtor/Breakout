@@ -176,10 +176,30 @@ local function encode(value)
 end
 local boundary = nativeBoundaries[1]
 local mapped, unmapped = {}, {}
+local constantTables,constantReads={},0
+local function materializeConstants(arguments)
+    for _,position in ipairs({4,7,12,16})do
+        local values=arguments[position]
+        local indices=type(values)=="table" and rawget(values,-1)
+        if type(indices)=="table" and not constantTables[values] then
+            constantTables[values]=true
+            for slot in next,indices do
+                assert(type(slot)=="number","Unexpected constant slot")
+                constantReads+=1
+                assert(constantReads<=50000,"Original constant read budget exceeded")
+                -- Access the original metatable while its decoder is live.
+                -- Resolving a constant does not invoke any returned callback.
+                local value=values[slot]
+                rawset(values,slot,value)
+            end
+        end
+    end
+end
 if boundary and type(boundary.definitions)=="table" then
     for id=1,19,2 do
         local owner = functionOwners[boundary.definitions[id]]
         if owner then mapped[#mapped+1]={callback=id,constructor=owner.constructor}
+            materializeConstants(constructors[owner.constructor].arguments)
         else unmapped[#unmapped+1]=id end
         -- These values are lazy and are absent from next() until accessed.
         -- Resolve them while their original decoder and buffer still exist.
@@ -189,7 +209,7 @@ if boundary and type(boundary.definitions)=="table" then
         rawset(boundary.definitions,id+1,specification)
     end
 end
-local report={constructors=constructors,boundaries=nativeBoundaries,mapped=mapped,unmapped=unmapped,failure=not ok and tostring(failure) or nil}
+local report={constructors=constructors,boundaries=nativeBoundaries,mapped=mapped,unmapped=unmapped,constantReads=constantReads,failure=not ok and tostring(failure) or nil}
 local rootReference=encode(report)
 local result='{"schema":"chilli-original-capture-v1","sourceSha256":"'..ORIGINAL_SOURCE_SHA256..'","runtimeSha256":"'..ORIGINAL_RUNTIME_SHA256..'","ok":'..tostring(ok)..',"applicationCaptured":'..tostring(applicationCaptured)..',"mappedCallbacks":'..#mapped..',"root":'..rootReference..',"objects":['..table.concat(objects,",")..']}'
 assert(type(writefile)=="function", "writefile unavailable; original capture cannot be exported")
