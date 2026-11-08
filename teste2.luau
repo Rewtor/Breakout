@@ -42,6 +42,7 @@ end
 local cfg = {
     W = "",
     SpecialWebhook = "",
+    HealthWebhook = "",
     WebhookMinIncome = 0,
     P = "",
     I = 0,
@@ -69,6 +70,7 @@ end
 
 cfg.W = type(cfg.W) == "string" and cfg.W or ""
 cfg.SpecialWebhook = type(cfg.SpecialWebhook) == "string" and cfg.SpecialWebhook or ""
+cfg.HealthWebhook = type(cfg.HealthWebhook) == "string" and cfg.HealthWebhook or ""
 cfg.WebhookMinIncome = math.max(0, finite(cfg.WebhookMinIncome) or 0)
 cfg.P = type(cfg.P) == "string" and cfg.P or ""
 cfg.I = math.max(0, finite(cfg.I) or 0)
@@ -638,6 +640,7 @@ end
 
 addBox("Webhook URL", cfg.W, function(v) cfg.W = v end)
 addBox("Webhook do alerta especial", cfg.SpecialWebhook, function(v) cfg.SpecialWebhook = v end)
+addBox("Webhook de status do bot", cfg.HealthWebhook, function(v) cfg.HealthWebhook = v end)
 addBox("Rendimento mínimo para webhook padrão ($/s)", cfg.WebhookMinIncome, function(v)
     cfg.WebhookMinIncome = math.max(0, finite(v) or 0)
 end)
@@ -1991,6 +1994,7 @@ local function updateEgg(uid, model, rec, now)
 end
 
 local lastScanWarning = 0
+local healthState = "starting"
 
 local function scan()
     loadModules()
@@ -2064,6 +2068,7 @@ local function scan()
         and now - lastValidEggTime >= cfg.AHT then
         task.spawn(doServerHop, true)
     end
+    healthState = hasMatchingEgg and "holding" or (errors > 0 and "degraded" or "scanning")
 
     if not minimized and not mobile then
         local stateText = "Monitorando o mapa"
@@ -2101,6 +2106,7 @@ task.spawn(function()
             local ok, err = pcall(scan)
 
             if not ok and alive then
+                healthState = "degraded"
                 setText(stat, "Falha ao atualizar. Tentando novamente...")
                 local now = os.clock()
 
@@ -2112,5 +2118,17 @@ task.spawn(function()
         end
 
         task.wait(SCAN_INTERVAL)
+    end
+end)
+
+task.spawn(function()
+    while alive do
+        if cfg.HealthWebhook ~= "" then
+            local state = paused and "paused" or (isHopping and "hopping" or healthState)
+            postWebhook({
+                content = string.format("DICE_RADAR_HEARTBEAT_V1 %d %s", player.UserId, state),
+            }, cfg.HealthWebhook)
+        end
+        task.wait(60)
     end
 end)
