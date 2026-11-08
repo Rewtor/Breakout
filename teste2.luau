@@ -223,6 +223,7 @@ end
 
 local function shouldNotify(data)
     return data and data.Ready and data.R >= cfg.WebhookMinIncome
+        and (rarityRanks[data.Rar] or 0) >= rarityRanks.Cosmic
         and (cfg.Sweep or isTarget(data))
 end
 
