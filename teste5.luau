@@ -47,6 +47,10 @@ local cfg = {
     S = 0,
     WH = false,
     FARM = false,
+    AUTO_FISH = false,
+    ANTI_AFK = false,
+    SELL_PETS = {},
+    SELL_EGGS = {},
     OUTBOUND_JUMP = false,
     AH = false,
     AHT = 60,
@@ -75,6 +79,8 @@ cfg.AHT = math.max(5, finite(cfg.AHT) or 60)
 cfg.PC = tonumber(cfg.PC) == 2 and 2 or 1
 cfg.WH = cfg.WH == true
 cfg.FARM = cfg.FARM == true
+cfg.AUTO_FISH = cfg.AUTO_FISH == true
+cfg.ANTI_AFK = cfg.ANTI_AFK == true
 cfg.OUTBOUND_JUMP = cfg.OUTBOUND_JUMP == true
 cfg.AH = cfg.AH == true
 
@@ -94,6 +100,7 @@ pcall(function()
 end)
 
 local alive = true
+local stopAntiAfk
 local paused = false
 local mobile = UIS.TouchEnabled
 local compact = true
@@ -290,6 +297,7 @@ local collectorBusy = false
 local stopCollection
 
 local isHopping = false
+local fishingSession
 local hopGeneration = 0
 local lastValidEggTime = os.clock()
 
@@ -307,6 +315,7 @@ local gui = create("ScreenGui", host, {
 
 connect(gui.Destroying, function()
     if stopCollection then stopCollection(true) end
+    if stopAntiAfk then stopAntiAfk() end
     alive = false
     uiMotion.generation = uiMotion.generation + 1
     if uiMotion.panel then uiMotion.panel:Cancel() end
@@ -433,6 +442,11 @@ create("UIListLayout", settings, {
     SortOrder = Enum.SortOrder.LayoutOrder,
 })
 
+local farmPage = settings:Clone()
+farmPage.Name = "Farm"
+farmPage.Parent = body
+local farmTab = button(body, "Farm", UDim2.new(), UDim2.new())
+
 local mobileOptions = create("Frame", settings, {
     Size = UDim2.new(1, -8, 0, 100),
     BackgroundTransparency = 1,
@@ -540,12 +554,16 @@ local function layout()
     radarTab.ZIndex, settingsButton.ZIndex = 2, 2
     radarTab.Position, radarTab.Size = UDim2.new(1, 10, 0, 46), UDim2.fromOffset(tabWidth, 32)
     settingsButton.Position, settingsButton.Size = UDim2.new(1, 10, 0, 86), UDim2.fromOffset(tabWidth, 32)
+    farmTab.Parent, farmTab.ZIndex = main, 2
+    farmTab.Position, farmTab.Size = UDim2.new(1, 10, 0, 126), UDim2.fromOffset(tabWidth, 32)
+    farmTab.TextSize = 18
     radarTab.Text, settingsButton.Text = "Ovos", "Ajustes"
     radarTab.TextSize, settingsButton.TextSize = 18, 18
     local active = ColorSequence.new(Color3.fromRGB(75, 229, 252), Color3.fromRGB(23, 137, 217))
     local idle = ColorSequence.new(Color3.fromRGB(224, 178, 42), Color3.fromRGB(144, 102, 13))
     radarTab:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and idle or active
-    settingsButton:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and active or idle
+    settingsButton:FindFirstChildOfClass("UIGradient").Color = uiMotion.settings and not uiMotion.farm and active or idle
+    farmTab:FindFirstChildOfClass("UIGradient").Color = uiMotion.farm and active or idle
     -- Ordenacao, detalhes e pausa ficam nos Ajustes, sem ocupar a grade de ovos.
     mobileOptions.Visible = true
     mobileOptions.Size = UDim2.new(1, -8, 0, 72)
@@ -559,6 +577,7 @@ local function layout()
     viewport.Position, viewport.Size = UDim2.fromOffset(8, 8), UDim2.new(0, contentWidth, 1, -8 - bottom)
     list.Position, list.Size = UDim2.new(), UDim2.fromScale(1, 1)
     settings.Position, settings.Size = UDim2.new(), UDim2.fromScale(1, 1)
+    farmPage.Position, farmPage.Size = UDim2.new(), UDim2.fromScale(1, 1)
     local columns = math.clamp(math.floor((contentWidth + 6) / 78), 1, 4)
     eggGrid.CellPadding = UDim2.fromOffset(6, 6)
     eggGrid.CellSize = UDim2.fromOffset(math.floor((contentWidth - (columns - 1) * 6 - 6) / columns), compact and 112 or 246)
@@ -573,7 +592,7 @@ local function layout()
     previewMeta.Position, previewMeta.Size = UDim2.fromOffset(6, iconHeight + 76), UDim2.new(1, -12, 0, 28)
     previewMeta.TextSize, previewMeta.TextTruncate = 9, Enum.TextTruncate.AtEnd
     previewMeta.Visible = previewHeight >= iconHeight + 104
-    stat.Visible = true
+    stat.Visible = not uiMotion.farm
     stat.Position = UDim2.new(0, 8, 1, -32)
     stat.Size = UDim2.fromOffset((uiMotion.settings or mobile) and width - 16 or contentWidth, 24)
     stat.TextSize = 13
@@ -584,11 +603,12 @@ local function layout()
         hopButton.Position, hopButton.Size = UDim2.new(0, 8, 1, -68), UDim2.new(0.65, -12, 0, 28)
         cancelButton.Position, cancelButton.Size = UDim2.new(0.65, 0, 1, -68), UDim2.new(0.35, -8, 0, 28)
     end
-    cancelButton.Visible = true
+    cancelButton.Visible = not uiMotion.farm
     footer.Visible = false
     empty.Position, empty.Size = UDim2.fromOffset(16, 16), UDim2.new(0, contentWidth - 16, 0, 48)
     empty.Visible = not uiMotion.settings and #sorted == 0
     refreshHopButton()
+    hopButton.Visible = not uiMotion.farm
     if refreshFinder then refreshFinder() end
     if render then render() end
 end
@@ -631,18 +651,21 @@ connect(gui:GetPropertyChangedSignal("AbsoluteSize"), function()
     shade.Visible, shade.BackgroundTransparency = not minimized, minimized and 1 or 0.6
     layout()
 end)
-local function selectTab(showSettings)
+local function selectTab(showSettings, showFarm)
     if uiMotion.tab then uiMotion.tab:Cancel() end
     uiMotion.settings = showSettings
-    settings.Visible, list.Visible = showSettings, not showSettings
+    uiMotion.farm = showFarm
+    settings.Visible, list.Visible = showSettings and not showFarm, not showSettings
+    farmPage.Visible = showFarm == true
     layout()
-    local incoming = showSettings and settings or list
+    local incoming = showFarm and farmPage or (showSettings and settings or list)
     incoming.Position = UDim2.fromOffset(showSettings and 28 or -28, 0)
     uiMotion.tab = TweenService:Create(incoming, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new()})
     uiMotion.tab:Play()
 end
 connect(radarTab.Activated, function() selectTab(false) end)
 connect(settingsButton.Activated, function() selectTab(true) end)
+connect(farmTab.Activated, function() selectTab(true, true) end)
 connect(minimizeButton.Activated, function() setPanelOpen(false) end)
 connect(closeButton.Activated, function() setPanelOpen(false) end)
 connect(shade.Activated, function() setPanelOpen(false) end)
@@ -804,8 +827,8 @@ do
     end)
 end
 
-local function addBox(label, value, callback)
-    local frame = create("Frame", settings, {
+local function addBox(label, value, callback, page)
+    local frame = create("Frame", page or settings, {
         Size = UDim2.new(1, -8, 0, 74),
         BackgroundColor3 = Color3.fromRGB(60, 60, 66),
         BorderSizePixel = 0,
@@ -839,8 +862,8 @@ local function addBox(label, value, callback)
     connect(box.FocusLost, function() callback(box.Text) end)
 end
 
-local function addToggle(label, value, callback)
-    local frame = create("Frame", settings, {
+local function addToggle(label, value, callback, page)
+    local frame = create("Frame", page or settings, {
         Size = UDim2.new(1, -8, 0, 50),
         BackgroundTransparency = 1,
     })
@@ -879,8 +902,8 @@ local function addToggle(label, value, callback)
     end
 end
 
-local function addButton(label, callback)
-    local frame = create("Frame", settings, {
+local function addButton(label, callback, page)
+    local frame = create("Frame", page or settings, {
         Size = UDim2.new(1, -8, 0, 46),
         BackgroundTransparency = 1,
     })
@@ -890,8 +913,8 @@ local function addButton(label, callback)
     return btn
 end
 
-local function addSection(label)
-    return text(settings, {
+local function addSection(label, page)
+    return text(page or settings, {
         Text = label, Size = UDim2.new(1, -8, 0, 30), TextSize = 19,
         TextColor3 = Color3.fromRGB(255, 220, 97),
         TextYAlignment = Enum.TextYAlignment.Center,
@@ -2090,6 +2113,10 @@ stopCollection = function(preservePreference)
     collectionMessage("Coleta desligada. Viagem cancelada.")
 end
 local function startCollection(automatic)
+    if fishingSession then
+        collectionMessage("Desative a pesca antes de iniciar a coleta.")
+        return false
+    end
     if collectorBusy then
         collectionMessage("Caminhada em andamento; cancele antes de iniciar outra.")
         return
@@ -2125,6 +2152,517 @@ addButton("DESLIGAR coleta / cancelar viagem", stopCollection)
 updateJumpToggle=addToggle("Salto experimental na ida", cfg.OUTBOUND_JUMP, function(value)
     cfg.OUTBOUND_JUMP = value
 end)
+
+
+do
+    addSection("PESCA ALIEN", farmPage)
+    local fishingStatus = addSection("Equipe a vara Alien e fique de frente para a água.", farmPage)
+    fishingStatus.TextSize = 13
+    fishingStatus.TextWrapped = true
+    fishingStatus.Size = UDim2.new(1, -8, 0, 48)
+
+    local function status(message)
+        if alive then fishingStatus.Text = message end
+    end
+
+    local function fish(state)
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local backpack = player:FindFirstChildOfClass("Backpack")
+        assert(humanoid and backpack, "Personagem ou mochila ainda não carregados")
+        local function findAlienRod(container)
+            for _, tool in ipairs(container:GetChildren()) do
+                local name = string.lower(tool.Name)
+                if tool:IsA("Tool") and name:find("alien", 1, true)
+                    and (name:find("rod", 1, true) or name:find("vara", 1, true)
+                        or tool:FindFirstChild("RodTip", true)) then return tool end
+            end
+        end
+        local equipped = character:FindFirstChildOfClass("Tool")
+        local rod = findAlienRod(character) or findAlienRod(backpack)
+            or (equipped and equipped:FindFirstChild("RodTip", true) and equipped)
+        assert(rod, "Vara Alien não identificada na mochila. Equipe-a uma vez para iniciar.")
+        status("Ferramenta equipada: " .. rod.Name .. ". Procurando a interface de pesca…")
+        local root = character:FindFirstChild("HumanoidRootPart")
+        assert(root, "Personagem ainda não carregado")
+        local storage = game:GetService("ReplicatedStorage")
+        local packages = storage:FindFirstChild("Packages")
+        local networking = packages and packages:FindFirstChild("Networking")
+        assert(networking, "Packages/Networking ausente")
+        local function remote(name, class)
+            local instance = networking:FindFirstChild(name)
+            assert(instance and instance:IsA(class), "Interface de pesca ausente: " .. name)
+            return instance
+        end
+
+        local hold = remote("RE/Fishing/Hold", "RemoteEvent")
+        local cast = remote("RF/Fishing/Cast", "RemoteFunction")
+        local reel = remote("RF/Fishing/Reel", "RemoteFunction")
+        local cancel = remote("RE/Fishing/Cancel", "RemoteEvent")
+        local controllers = storage:FindFirstChild("Controllers")
+        local gameControllers = controllers and controllers:FindFirstChild("Game")
+        local fishing = gameControllers and gameControllers:FindFirstChild("FishingController")
+        local uiModule = fishing and fishing:FindFirstChild("Ui")
+        local uiLoaded, fishingUi = pcall(require, uiModule)
+        if not uiLoaded or type(fishingUi) ~= "table" then fishingUi = nil end
+        local shared = storage:FindFirstChild("Shared")
+        local util = shared and shared:FindFirstChild("Util")
+        local chargeModule = util and util:FindFirstChild("Fishing")
+        local charge = 1.2 * 0.875 ^ (5 / 7)
+        local checked, isPerfect = pcall(function()
+            local rules = require(chargeModule)
+            return rules.IsPerfect(rules.ChargeAt(charge))
+        end)
+        local localCheck = if checked and type(isPerfect) == "boolean"
+            then (if isPerfect then "Perfect local" else "fora da janela local")
+            else "janela local indisponível"
+        state.cancel = cancel
+
+        local function active()
+            if not alive or not state.running or player.Character ~= character or humanoid.Health <= 0 then
+                return false
+            end
+            if rod.Parent == character then return true end
+            assert(rod.Parent == backpack, "A vara saiu da mochila")
+            status("Equipando " .. rod.Name .. "…")
+            humanoid:EquipTool(rod)
+            local deadline = os.clock() + 1
+            while rod.Parent ~= character and alive and state.running
+                and player.Character == character and os.clock() < deadline do task.wait() end
+            if not alive or not state.running or player.Character ~= character then return false end
+            assert(rod.Parent == character, "O jogo não equipou a vara")
+            return true
+        end
+
+        local function waitWhileActive(seconds)
+            local deadline = os.clock() + seconds
+            while active() and os.clock() < deadline do task.wait(math.min(0.05, deadline - os.clock())) end
+            return active()
+        end
+
+        -- Same reel animation window and completion arguments as the extracted routine.
+        local function playReel()
+            local started = os.clock()
+            local visible = false
+            while active() and os.clock() - started < 1.2 do
+                local progress = (os.clock() - started - 1.05) / 0.15
+                if fishingUi and progress >= 0 then
+                    if not visible then
+                        pcall(fishingUi.ShowReel, true, "Click Fast!")
+                        visible = true
+                    end
+                    progress = math.min(progress, 1)
+                    pcall(fishingUi.SetReel, progress, math.floor(progress * 16), "Click Fast!")
+                    pcall(fishingUi.PunchReel)
+                end
+                task.wait()
+            end
+            if fishingUi then pcall(fishingUi.ShowReel, false) end
+            return active()
+        end
+
+        local function fishOnce()
+            status(string.format("Carregando por %.3f s · %s", charge, localCheck))
+            local target = root.Position + root.CFrame.LookVector * 30 - Vector3.new(0, 3, 0)
+            hold:FireServer()
+            local chargeStarted = os.clock()
+            while active() and os.clock() - chargeStarted < charge do task.wait() end
+            if not active() then return end
+            local elapsed = os.clock() - chargeStarted
+            local attempt, reason = cast:InvokeServer(charge, target)
+            assert(type(attempt) == "table" and attempt.Id ~= nil,
+                "Lançamento recusado: " .. tostring(reason or attempt or "sem resposta do servidor"))
+            state.pending = attempt.Id
+            local delay = tonumber(attempt.Wait) or 3
+            local serverCheck = "Servidor: sem confirmação"
+            if type(attempt.Perfect) == "boolean" then
+                serverCheck = "Servidor: Perfect=" .. tostring(attempt.Perfect)
+            end
+            local luck = attempt.CastLuck or attempt.Luck
+            if type(luck) == "number" or type(luck) == "string" then
+                serverCheck = serverCheck .. " · sorte=" .. tostring(luck)
+            end
+            if active() and attempt.Perfect == true and tonumber(luck) == 1.5 then
+                local camera = workspace.CurrentCamera
+                local shown = false
+                if camera and fishingUi and type(fishingUi.Perfect) == "function" then
+                    local point, visible = camera:WorldToViewportPoint(root.Position + Vector3.new(0, 4, 0))
+                    if visible then
+                        shown = pcall(fishingUi.Perfect,
+                            Vector2.new(point.X / camera.ViewportSize.X, point.Y / camera.ViewportSize.Y))
+                    end
+                end
+                if not shown then
+                    local notice = text(gui, {
+                        Text = "PERFECT! ×1.5", TextSize = 28,
+                        AnchorPoint = Vector2.new(0.5, 0.5),
+                        Position = UDim2.fromScale(0.5, 0.28),
+                        Size = UDim2.fromOffset(240, 42),
+                        TextColor3 = Color3.fromRGB(155, 255, 76),
+                        BackgroundTransparency = 1, ZIndex = 100,
+                    })
+                    task.delay(1.5, function() notice:Destroy() end)
+                end
+            end
+            local diagnostic = localCheck .. "\n" .. serverCheck
+            print(string.format("[Hopper Fishing] Carga %.3f s / real %.3f s · %s", charge, elapsed, diagnostic))
+            status(diagnostic .. "\nAguardando mordida…")
+            if not waitWhileActive(delay) then return end
+
+            if attempt.Mode == "Nothing" or attempt.Mode == "Hint" or attempt.Mode == "Quest" or attempt.Mode == "GhostFish" then
+                cancel:FireServer(state.pending)
+            else
+                status("Recolhendo…")
+                if not playReel() then return end
+                local caught, reward = reel:InvokeServer(state.pending, "Caught", 16)
+                assert(caught == true, "Recolhimento recusado: " .. tostring(reward or "sem resposta do servidor"))
+                if type(reward) == "table" then
+                    status(string.format("Captura: %s × %s\n%s", tostring(reward.Amount), tostring(reward.DisplayName), serverCheck))
+                    if fishingUi then task.spawn(pcall, fishingUi.Reveal, reward, 2.6) end
+                else
+                    status("Captura concluída\n" .. serverCheck)
+                end
+            end
+            state.pending = nil
+        end
+
+        local failures = 0
+        while active() do
+            local ok, problem = pcall(fishOnce)
+            if state.pending ~= nil then
+                pcall(cancel.FireServer, cancel, state.pending)
+                state.pending = nil
+            end
+            if not active() then break end
+            if ok then
+                failures = 0
+                waitWhileActive(1)
+            else
+                failures += 1
+                local retryDelay = math.min(30, failures * 3)
+                warn("[Hopper Fishing] " .. tostring(problem))
+                status(string.format("Pesca falhou. Nova tentativa em %d s.\n%s", retryDelay, tostring(problem)))
+                waitWhileActive(retryDelay)
+            end
+        end
+    end
+
+    local paint
+    local function setFishing(enabled)
+        cfg.AUTO_FISH = enabled
+        if not enabled then
+            if fishingSession then fishingSession.running = false end
+            return
+        end
+        if fishingSession then
+            cfg.AUTO_FISH = false
+            paint(false)
+            return
+        end
+        if cfg.FARM or collector.enabled or isHopping then
+            cfg.AUTO_FISH = false
+            status("Encerre a coleta ou a troca de servidor antes de pescar.")
+            paint(false)
+            return
+        end
+        local state = {running = true}
+        fishingSession = state
+        task.spawn(function()
+            local ok, problem = pcall(fish, state)
+            if state.pending ~= nil then
+                pcall(state.cancel.FireServer, state.cancel, state.pending)
+            end
+            fishingSession = nil
+            if alive then
+                cfg.AUTO_FISH = false
+                status(if ok then "Pesca parada" else tostring(problem))
+                paint(false)
+            end
+        end)
+    end
+    paint = addToggle("Pesca automática", cfg.AUTO_FISH, setFishing, farmPage)
+    if cfg.AUTO_FISH then task.defer(function() if alive and cfg.AUTO_FISH then setFishing(true) end end) end
+end
+
+do
+    local enabled = false
+    local generation = 0
+    local disabledConnections = {}
+    local activityCallbacks = {}
+    local teleportUpvalues = {}
+    local noTeleport = setmetatable({}, {__index = function() return function() end end})
+
+    local function disableIdleConnections()
+        if type(getconnections) ~= "function" then return end
+        local ok, listeners = pcall(getconnections, player.Idled)
+        if not ok or type(listeners) ~= "table" then return end
+        for _, listener in ipairs(listeners) do
+            local changed, disabled = pcall(function()
+                if disabledConnections[listener] or listener.Enabled == false then return false end
+                listener:Disable()
+                return true
+            end)
+            if changed and disabled then disabledConnections[listener] = true end
+        end
+    end
+
+    local function findActivityCallbacks(run)
+        if type(getgc) ~= "function" or type(islclosure) ~= "function" then return end
+        local ok, objects = pcall(getgc, false)
+        if not ok or type(objects) ~= "table" then return end
+        for index, callback in ipairs(objects) do
+            if index % 120 == 0 then task.wait() end
+            if not alive or not enabled or generation ~= run then return end
+            if type(callback) == "function" and islclosure(callback) then
+                local found, source = pcall(debug.info, callback, "s")
+                if found and type(source) == "string" and source:find("AntiAFK", 1, true) then
+                    local _, name = pcall(debug.info, callback, "n")
+                    if name == "markActive" or name == "reportActiveFromInput" then
+                        table.insert(activityCallbacks, callback)
+                    end
+                    local read, upvalues = pcall(debug.getupvalues, callback)
+                    if read and type(upvalues) == "table" and type(debug.setupvalue) == "function" then
+                        for slot, value in pairs(upvalues) do
+                            if typeof(value) == "Instance" and value.ClassName == "TeleportService" then
+                                if pcall(debug.setupvalue, callback, slot, noTeleport) then
+                                    table.insert(teleportUpvalues, {callback, slot, value})
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    stopAntiAfk = function()
+        enabled = false
+        generation += 1
+        for listener in pairs(disabledConnections) do pcall(function() listener:Enable() end) end
+        for _, entry in ipairs(teleportUpvalues) do pcall(debug.setupvalue, table.unpack(entry)) end
+        table.clear(disabledConnections)
+        table.clear(teleportUpvalues)
+        table.clear(activityCallbacks)
+    end
+
+    local function setAntiAfk(value)
+        cfg.ANTI_AFK = value
+        if not value then stopAntiAfk(); return end
+        enabled = true
+        generation += 1
+        local run = generation
+        disableIdleConnections()
+        task.spawn(function()
+            task.wait(60)
+            if not alive or not enabled or generation ~= run then return end
+            findActivityCallbacks(run)
+            while alive and enabled and generation == run do
+                disableIdleConnections()
+                for _, callback in ipairs(activityCallbacks) do pcall(callback) end
+                task.wait(120)
+            end
+        end)
+    end
+    addToggle("Anti-AFK", cfg.ANTI_AFK, setAntiAfk, farmPage)
+    if cfg.ANTI_AFK then setAntiAfk(true) end
+
+    connect(player.CharacterAdded, function()
+        local run = generation
+        task.delay(1, function()
+            if alive and enabled and generation == run then disableIdleConnections() end
+        end)
+    end)
+end
+
+do
+    addSection("AUTO SELL", farmPage)
+    local rules = {"Raridade e renda", "Só raridade", "Só renda", "Raridade ou renda"}
+
+    local previews = {}
+    local function makeProfile(label, rarity, key)
+        local saved = type(cfg[key]) == "table" and cfg[key] or {}
+        local rank = finite(saved.maxRarity)
+        local rule = finite(saved.rule)
+        local profile = {
+            enabled = saved.enabled == true,
+            maxRarity = rank and math.clamp(math.floor(rank), 0, 10) or rarityRanks[rarity],
+            maxIncome = math.max(0, finite(saved.maxIncome) or 0),
+            keepMutated = saved.keepMutated ~= false,
+            rule = rule and math.clamp(math.floor(rule), 1, #rules) or 1,
+            blacklist = {},
+        }
+        cfg[key] = profile
+        local blacklistNames = {}
+        if type(saved.blacklist) == "table" then
+            for name, excluded in pairs(saved.blacklist) do
+                if type(name) == "string" and excluded == true then
+                    profile.blacklist[name] = true
+                    table.insert(blacklistNames, name)
+                end
+            end
+        end
+        table.sort(blacklistNames)
+        local rarityLabel = ""
+        for name, index in pairs(rarityRanks) do
+            if index == profile.maxRarity then rarityLabel = name; break end
+        end
+        addSection(label, farmPage)
+        previews[key] = addSection("0 selecionados", farmPage)
+        previews[key].TextSize = 13
+        addToggle("Vender automaticamente", profile.enabled, function(value) profile.enabled = value end, farmPage)
+        local ruleButton
+        ruleButton = addButton(rules[profile.rule], function()
+            profile.rule = profile.rule % #rules + 1
+            ruleButton.Text = rules[profile.rule]
+        end, farmPage)
+        addBox("Raridade máxima (Common a Divine)", rarityLabel, function(value)
+            local wanted = string.lower(value:match("^%s*(.-)%s*$"))
+            profile.maxRarity = 0
+            for name, rank in pairs(rarityRanks) do
+                if string.lower(name) == wanted then profile.maxRarity = rank; break end
+            end
+        end, farmPage)
+        addBox("Renda abaixo de ($/s; 0 desativa o critério)", profile.maxIncome, function(value)
+            profile.maxIncome = math.max(0, finite(value) or 0)
+        end, farmPage)
+        addToggle("Preservar mutações", profile.keepMutated, function(value) profile.keepMutated = value end, farmPage)
+        addBox("Nunca vender (nomes separados por vírgula)", table.concat(blacklistNames, ", "), function(value)
+            profile.blacklist = {}
+            for name in string.gmatch(value, "[^,]+") do
+                profile.blacklist[string.lower(name:match("^%s*(.-)%s*$"))] = true
+            end
+        end, farmPage)
+        return profile
+    end
+
+    local pets = makeProfile("PETS", "Rare", "SELL_PETS")
+    local eggs = makeProfile("OVOS DA BOLSA", "Cosmic", "SELL_EGGS")
+
+    local function mutationsOf(item)
+        local result = {}
+        local function add(name)
+            if type(name) == "string" and name ~= "" and name ~= "Normal" and name ~= "None"
+                and not table.find(result, name) then table.insert(result, name) end
+        end
+        add(item.BaseMutation)
+        add(item.Mutation)
+        if type(item.Mutations) == "table" then
+            for key, value in pairs(item.Mutations) do add(if value == true then key else value) end
+        end
+        return result
+    end
+
+    local function matches(item, profile)
+        if type(item) ~= "table" or item.IsFavorite or item.InFuse then return false end
+        local category = item.AssetCategory or item.Category
+        local asset = getAsset(category)
+        if not asset then return false end
+        if profile.blacklist[string.lower(tostring(asset.DisplayName or category))]
+            or profile.blacklist[string.lower(tostring(category))] then return false end
+        local mutations = mutationsOf(item)
+        if profile.keepMutated and #mutations > 0 then return false end
+
+        local rarity = asset.Rarity
+        local rank = type(rarity) == "table" and finite(rarity.RarityNumber or rarity.Rank)
+            or rarityRanks[rarityName(rarity)]
+        local byRarity = rank ~= nil and rank > 0 and rank <= profile.maxRarity
+        local income = incomeFor(asset.EarningRate, item.AssetScale or item.Scale or 1)
+        if income and #mutations > 0 then
+            local module = modules.Mutations
+            local ok, multiplier = pcall(function() return module.EarningsFor(mutations) end)
+            multiplier = ok and finite(multiplier) or nil
+            income = multiplier and multiplier > 0 and income * multiplier or nil
+        end
+        local byIncome = profile.maxIncome > 0 and income ~= nil and income < profile.maxIncome
+        if profile.rule == 1 then return byRarity and byIncome end
+        if profile.rule == 2 then return byRarity end
+        if profile.rule == 3 then return byIncome end
+        return byRarity or byIncome
+    end
+
+    local recentlySentPets, recentlySentEggs = {}, {}
+    local function nextSaleBatch(ids, recentlySent, now)
+        for uid, expires in pairs(recentlySent) do
+            if expires <= now then recentlySent[uid] = nil end
+        end
+        local batch = {}
+        for _, uid in ipairs(ids) do
+            if not recentlySent[uid] then
+                table.insert(batch, uid)
+                if #batch == 50 then break end
+            end
+        end
+        return batch
+    end
+
+    local function scanAndSell()
+        loadModules()
+        local shared = RS:FindFirstChild("Shared")
+        local saveModule = shared and shared:FindFirstChild("Save")
+        local loaded, save = pcall(function() return require(saveModule).Peek() end)
+        save = loaded and type(save) == "table" and save or {}
+        local petInventoryReady = type(save.EquippedAssets) == "table" and type(save.Inventory) == "table"
+        local equipped = {}
+        if petInventoryReady then
+            for _, uid in ipairs(save.EquippedAssets) do equipped[uid] = true end
+        end
+        local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
+        local held = tool and tool:GetAttribute("UID")
+        local petIds, eggIds = {}, {}
+        for uid, item in pairs(petInventoryReady and save.Inventory or {}) do
+            if type(uid) == "string" and uid ~= held and not equipped[uid] and matches(item, pets) then
+                table.insert(petIds, uid)
+            end
+        end
+        local eggState = modules.EggState
+        local owned = eggState and eggState.ReadOwnerEggs(player.UserId)
+        assert(type(owned) == "table", "Ovos da bolsa ainda não carregados")
+        local seenEggs, readEggs = {}, 0
+        for key, item in pairs(owned) do
+            local uid = type(key) == "string" and key
+                or (type(item) == "table" and (item.Uid or item.UID))
+            if type(uid) == "string" and uid ~= held and matches(item, eggs) and not item.Placement then
+                if not seenEggs[uid] then table.insert(eggIds, uid) end
+            end
+            if type(uid) == "string" and not seenEggs[uid] then
+                seenEggs[uid] = true
+                readEggs += 1
+            end
+        end
+        previews.SELL_PETS.Text = if petInventoryReady then string.format("%d pets selecionados", #petIds)
+            else "Inventário de pets ainda não carregado"
+        previews.SELL_EGGS.Text = string.format("%d de %d ovos selecionados", #eggIds, readEggs)
+        if collectorBusy or isHopping or not alive then return end
+        if not pets.enabled then table.clear(petIds) end
+        if not eggs.enabled then table.clear(eggIds) end
+        if #petIds + #eggIds == 0 then return end
+
+        local packages = RS:FindFirstChild("Packages")
+        local networking = packages and packages:FindFirstChild("Networking")
+        local sell = networking and networking:FindFirstChild("RE/PetSatchel/SellSelection")
+        assert(sell and sell:IsA("RemoteEvent"), "Interface de venda indisponível")
+        local now = os.clock()
+        local petBatch = nextSaleBatch(petIds, recentlySentPets, now)
+        local eggBatch = nextSaleBatch(eggIds, recentlySentEggs, now)
+        if #petBatch + #eggBatch == 0 then return end
+        sell:FireServer({Assets = petBatch, Eggs = eggBatch})
+        for _, uid in ipairs(petBatch) do recentlySentPets[uid] = now + 30 end
+        for _, uid in ipairs(eggBatch) do recentlySentEggs[uid] = now + 30 end
+    end
+
+    task.spawn(function()
+        while alive do
+            if pets.enabled or eggs.enabled or (farmPage.Visible and not minimized) then
+                local ok, problem = pcall(scanAndSell)
+                if not ok and alive then
+                    previews.SELL_PETS.Text = tostring(problem)
+                    previews.SELL_EGGS.Text = "Venda aguardando dados"
+                end
+            end
+            task.wait(5)
+        end
+    end)
+end
 
 -- Uma tentativa por ida; sem alterar o verificador de movimento do jogo.
 -- A aproximacao final e a volta continuam no controlador de caminhada.
@@ -2759,7 +3297,7 @@ local function scan()
 
     if targets > 0 or collectorBusy then
         lastValidEggTime = now
-    elseif errors == 0 and cfg.AH and not isHopping and not collector.enabled
+    elseif errors == 0 and cfg.AH and not isHopping and not collector.enabled and not fishingSession
         and now - lastValidEggTime >= cfg.AHT then
         task.spawn(doServerHop)
     end
