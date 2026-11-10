@@ -76,7 +76,7 @@ cfg.P = type(cfg.P) == "string" and cfg.P or ""
 cfg.I = math.max(0, finite(cfg.I) or 0)
 cfg.S = math.max(0, finite(cfg.S) or 0)
 cfg.AHT = math.max(5, finite(cfg.AHT) or 60)
-cfg.PC = tonumber(cfg.PC) == 2 and 2 or 1
+cfg.PC = cfg.PC == "alternate" and "alternate" or (tonumber(cfg.PC) == 2 and 2 or 1)
 cfg.WH = cfg.WH == true
 cfg.AH = cfg.AH == true
 cfg.Sweep = cfg.Sweep == true
@@ -677,10 +677,10 @@ end)
 
 local playerCountButton
 playerCountButton = addButton(
-    "Buscar servidores com " .. cfg.PC .. " jogador(es)",
+    cfg.PC == "alternate" and "Busca alternada: 1 e 2 jogadores" or ("Buscar servidores com " .. cfg.PC .. " jogador(es)"),
     function()
-        cfg.PC = cfg.PC == 1 and 2 or 1
-        playerCountButton.Text = "Buscar servidores com " .. cfg.PC .. " jogador(es)"
+        cfg.PC = cfg.PC == 1 and 2 or (cfg.PC == 2 and "alternate" or 1)
+        playerCountButton.Text = cfg.PC == "alternate" and "Busca alternada: 1 e 2 jogadores" or ("Buscar servidores com " .. cfg.PC .. " jogador(es)")
     end
 )
 
@@ -1713,96 +1713,106 @@ doServerHop = function(automatic)
     end
 
     local ok, err = pcall(function()
-        local cursor = ""
-        local failures = 0
-        local target = cfg.PC
-        local remainingToSkip = target == 1 and 20 or 0
+        local alternate = cfg.PC == "alternate"
+        local target = alternate and 1 or cfg.PC
+        repeat
+            local cursor = ""
+            local failures = 0
+            local remainingToSkip = target == 1 and 20 or 0
 
-        for page = 1, 30 do
-            if not current() then return end
+            for page = 1, 30 do
+                if not current() then return end
 
-            hopStatus.Text = string.format(
-                "Buscando %d jogador(es) • página %d/30",
-                target, page
-            )
+                hopStatus.Text = string.format(
+                    "Buscando %d jogador(es) • página %d/30",
+                    target, page
+                )
 
-            local url = "https://games.roblox.com/v1/games/"
-                .. tostring(game.PlaceId)
-                .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
+                local url = "https://games.roblox.com/v1/games/"
+                    .. tostring(game.PlaceId)
+                    .. "/servers/Public?sortOrder=Asc&limit=100&excludeFullGames=true"
 
-            if cursor ~= "" then url = url .. "&cursor=" .. Http:UrlEncode(cursor) end
-            url = url .. "&_nocache=" .. tostring(math.floor(os.clock() * 1000))
+                if cursor ~= "" then url = url .. "&cursor=" .. Http:UrlEncode(cursor) end
+                url = url .. "&_nocache=" .. tostring(math.floor(os.clock() * 1000))
 
-            local success, data = pcall(function()
-                return Http:JSONDecode(game:HttpGet(url))
-            end)
+                local success, data = pcall(function()
+                    return Http:JSONDecode(game:HttpGet(url))
+                end)
 
-            if not current() then return end
+                if not current() then return end
 
-            if not success or type(data) ~= "table" or type(data.data) ~= "table" then
-                failures = failures + 1
-                if failures >= 3 then
-                    release("Busca interrompida após 3 falhas.")
-                    return
-                end
-                hopStatus.Text = "Falha na consulta. Tentando novamente..."
-                task.wait(failures)
-            else
-                failures = 0
-
-                -- Candidatos existem apenas para esta pagina.
-                -- Modo 1: descarta somente os primeiros 50 resultados da busca inteira.
-                local candidates = {}
-                local skipped = math.min(remainingToSkip, #data.data)
-                remainingToSkip = remainingToSkip - skipped
-                local firstIndex = skipped + 1
-                for index = firstIndex, #data.data do
-                    local server = data.data[index]
-                    if type(server) == "table" then
-                        local playing = finite(server.playing)
-                        local maximum = finite(server.maxPlayers)
-
-                        if type(server.id) == "string"
-                            and server.id ~= ""
-                            and server.id ~= game.JobId
-                            and playing == target
-                            and maximum and playing < maximum then
-                            candidates[#candidates + 1] = server.id
-                        end
-                    end
-                end
-
-                if #candidates > 0 then
-                    if not current() then return end
-                    if automatic and hasMatchingEgg then
-                        release("Alvo encontrado. Permanecendo no servidor.")
+                if not success or type(data) ~= "table" or type(data.data) ~= "table" then
+                    failures = failures + 1
+                    if failures >= 3 then
+                        if alternate then break end
+                        release("Busca interrompida após 3 falhas.")
                         return
                     end
-                    local selected = candidates[math.random(1, #candidates)]
-                    hopStatus.Text = "Teleportando..."
-                    Teleport:TeleportToPlaceInstance(game.PlaceId, selected, player)
+                    hopStatus.Text = "Falha na consulta. Tentando novamente..."
+                    task.wait(failures)
+                else
+                    failures = 0
 
-                    task.delay(12, function()
-                        if current() and isHopping then
-                            release("Teleporte não concluído. Tente novamente.")
+                    -- Candidatos existem apenas para esta pagina.
+                    -- Modo 1: aplica o descarte inicial uma vez por busca.
+                    local candidates = {}
+                    local skipped = math.min(remainingToSkip, #data.data)
+                    remainingToSkip = remainingToSkip - skipped
+                    local firstIndex = skipped + 1
+                    for index = firstIndex, #data.data do
+                        local server = data.data[index]
+                        if type(server) == "table" then
+                            local playing = finite(server.playing)
+                            local maximum = finite(server.maxPlayers)
+
+                            if type(server.id) == "string"
+                                and server.id ~= ""
+                                and server.id ~= game.JobId
+                                and playing == target
+                                and maximum and playing < maximum then
+                                candidates[#candidates + 1] = server.id
+                            end
                         end
-                    end)
-                    return
-                end
+                    end
 
-                if type(data.nextPageCursor) ~= "string"
-                    or data.nextPageCursor == "" then
-                    break
-                end
+                    if #candidates > 0 then
+                        if not current() then return end
+                        if automatic and hasMatchingEgg then
+                            release("Alvo encontrado. Permanecendo no servidor.")
+                            return
+                        end
+                        local selected = candidates[math.random(1, #candidates)]
+                        hopStatus.Text = "Teleportando..."
+                        Teleport:TeleportToPlaceInstance(game.PlaceId, selected, player)
 
-                cursor = data.nextPageCursor
-                task.wait(0.15)
+                        task.delay(12, function()
+                            if current() and isHopping then
+                                release("Teleporte não concluído. Tente novamente.")
+                            end
+                        end)
+                        return
+                    end
+
+                    if type(data.nextPageCursor) ~= "string"
+                        or data.nextPageCursor == "" then
+                        break
+                    end
+
+                    cursor = data.nextPageCursor
+                    task.wait(0.15)
+                end
             end
-        end
 
-        if not current() then return end
+            if not current() then return end
 
-        release("Nenhum servidor com " .. target .. " jogador(es) passou pelo filtro.")
+            if not alternate then
+                release("Nenhum servidor com " .. target .. " jogador(es) passou pelo filtro.")
+                return
+            end
+
+            target = 3 - target
+            task.wait(1)
+        until not current()
     end)
 
     if not ok then
